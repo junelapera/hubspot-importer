@@ -8,6 +8,7 @@ Scaffolded, no feature code yet. Planning docs live alongside the source:
 
 - `hubdb-importer-prd.md` — the source-of-truth PRD (v0.1). Sections are stable references throughout the phase docs (e.g. F1–F11, §8, §10).
 - `phases/phase-0-spike.md` … `phase-3.md` — task-checklist breakdown of PRD §12.
+- `STATUS.md` — running project log: what's done, what's in flight, what's next. **Read this first** at the start of a session to catch up.
 
 ## Stack
 
@@ -28,6 +29,9 @@ pnpm start                                # next start (prod, after build)
 pnpm lint                                 # eslint
 pnpm exec tsc --noEmit                    # typecheck without emit
 pnpm dlx shadcn@latest add <component>    # add a shadcn/ui component
+
+# Phase-0 spike scripts — reads .env.local (HUBSPOT_TOKEN required)
+pnpm spike scripts/spike/00-ping.ts
 ```
 
 ## What this app does
