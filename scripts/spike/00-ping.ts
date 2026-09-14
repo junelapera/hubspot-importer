@@ -1,14 +1,33 @@
-import { hubdb, log, runSpike } from "./client";
+import { hubdb, HubdbError, log, runSpike, type ApiBase } from "./client";
 
 type TablesResponse = {
   results: Array<{ id: string; name: string; label: string; published: boolean }>;
   total?: number;
 };
 
+async function ping(base: ApiBase) {
+  const started = performance.now();
+  try {
+    const res = await hubdb<TablesResponse>("/tables", { base });
+    const ms = Math.round(performance.now() - started);
+    return {
+      base,
+      ok: true as const,
+      ms,
+      count: res.results?.length ?? 0,
+      sample: res.results?.slice(0, 5).map((t) => ({ id: t.id, name: t.name, published: t.published })),
+    };
+  } catch (err) {
+    const ms = Math.round(performance.now() - started);
+    if (err instanceof HubdbError) {
+      return { base, ok: false as const, ms, status: err.status, body: err.responseBody };
+    }
+    throw err;
+  }
+}
+
 runSpike(async () => {
-  const v3 = await hubdb<TablesResponse>("/tables", { base: "v3" });
-  log("v3 /tables", {
-    count: v3.results?.length ?? 0,
-    sample: v3.results?.slice(0, 5).map((t) => ({ id: t.id, name: t.name, published: t.published })),
-  });
+  const [v3, dated] = await Promise.all([ping("v3"), ping("dated")]);
+  log("v3 /tables", v3);
+  log("dated /tables", dated);
 });
