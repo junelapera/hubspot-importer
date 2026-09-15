@@ -62,6 +62,9 @@ export type {
   ProvisionResult,
 } from "./provision";
 
+export { validateHubdbToken } from "./introspection";
+export type { IntrospectionResult, IntrospectionOptions } from "./introspection";
+
 export {
   ImportPreflightError,
   importRows,

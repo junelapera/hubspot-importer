@@ -4,13 +4,36 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Repository status
 
-Phase 0 spike complete. No feature code (`lib/hubdb/`, `lib/graph.ts`, `app/api/`, `app/import/`, `workers/`) yet — only planning docs and a set of one-shot spike scripts that proved the API chain end-to-end.
+**Phase 1 (MVP) in progress.** Full `lib/` layer is shipped and tested (88 vitest cases / 7 suites). F1 (portal connection) is wired end-to-end — Supabase migration applied, token encryption working, `/portals` UI live at `pnpm dev`.
 
-- `hubdb-importer-prd.md` — the source-of-truth PRD (v0.1). Sections are stable references throughout the phase docs (e.g. F1–F11, §8, §10). **PRD §6 and §8 need revision** — see F0-2 in `phases/phase-0-spike.md`
-- `phases/phase-0-spike.md` — completed spike with 9 numbered findings and 6 locked-in decisions. Read this before touching `lib/hubdb/` or `lib/graph.ts`
-- `phases/phase-1.md` … `phase-3.md` — remaining phase task lists
+- `hubdb-importer-prd.md` — the source-of-truth PRD (v0.1). Sections are stable references throughout the phase docs (F1–F11, §8, §10). **PRD §6 and §8 need revision** — see F0-2 in `phases/phase-0-spike.md`
+- `phases/phase-0-spike.md` — closed spike with 9 original findings + 3 Phase-1 addendum findings (F0-10/11/12 on PATCH semantics). Read the addendum before touching `patchTable` / `provision`
+- `phases/phase-1-mvp.md` — task checklist; check the boxes there as work lands (about half done)
+- `phases/phase-2.md`, `phase-3.md` — later-phase task lists
 - `STATUS.md` — running project log: what's done, what's in flight, what's next. **Read this first** at the start of a session to catch up
-- `scripts/spike/` — Phase-0 spike CLIs (`client.ts`, `00-ping.ts` … `05-publish.ts`, plus `99-inspect.ts`). Kept in-tree as reference / regression checks; not part of the app
+- `scripts/spike/` — one-off CLI scripts kept in-tree as regression checks and investigation traces. `00-ping` through `05-publish` proved the Phase-0 API chain; `06-11` traced the PATCH-semantics investigation (F0-10/11/12); `12-supabase-ping` verifies the Supabase migration is applied. Not part of the app runtime
+
+## What's built
+
+**Core lib** (all typechecked + vitest-covered):
+
+- `lib/hubdb/` — typed HubDB wrapper with per-portal `createHubdbClient({token})` factory, 429/5xx retry honoring `Retry-After`, id normalization to strings, `/rows/draft/batch/*` path enforcement, 100-row cap. Ops: `listTables`, `getTable`, `getDraftTable`, `createTable`, `patchTable`, `pushLive`, `listAll{Draft,Live}Rows`, `batch{Create,Update,Purge}DraftRows`
+- `lib/hubdb/provision.ts` — topological two-phase provisioner. Consumes a `DiffPlan` from `lib/schema` + `ProvisionOps` adapter; runs `breakCycles` for the two-phase strategy (create without FK cols → PATCH-in). Sends `portal.columns + new columns` on every PATCH per F0-11
+- `lib/hubdb/import.ts` — F8 execution. `importRows(ops, {schema, tableIds, source})` walks the schema in toposort order, fetches existing rows, builds a naturalKey keymap, splits into insert/update, batches at 100. Fresh row ids fold back into the keymap so downstream tables resolve
+- `lib/hubdb/introspection.ts` — `validateHubdbToken(token)` for F1's token check
+- `lib/graph.ts` — `toposort`, `toposortOrThrow`, `breakCycles`. Iterative Tarjan's for SCC / cycle detection. Converters from `HubdbTableInput` and `HubdbTable`
+- `lib/schema.ts` — zod parse + cross-ref validation (surfaces all issues at once) + `resolveDefaults` (FK `foreignColumn` defaults to target's single-column naturalKey) + `diffSchema` returning per-table `create | match | update | conflict`
+- `lib/resolve.ts` — `normalizeKey` (trim + collapse ws + casefold), `buildKeyMap` (natural key → row id with duplicate detection), `resolveForeignValue` (all-or-nothing per cell; dedupes; empty → `[]`), `splitMultiValue`. `HUBDB_MAX_ROWS_PER_TABLE` constant
+- `lib/crypto.ts` — AES-256-GCM `encrypt`/`decrypt` returning `base64(iv || tag || ciphertext)`. Reads `PORTAL_TOKEN_ENCRYPTION_KEY`. `generateEncryptionKey()` helper
+- `lib/db/supabase.ts` — server-only `createSupabaseServerClient()` factory. Contains a `ws`-based WebSocket polyfill for Node 20 (retire when we go to Node 22)
+- `lib/db/portals.ts` — typed portal repo: `PortalRow` (server) vs `PortalSummary` (client-safe); `createPortal` / `listPortals` / `getPortalById` / `getPortalToken` (server-only decrypt) / `deletePortal`
+
+**App surface** (F1 only, so far):
+
+- `app/api/portals/route.ts` — GET + POST. `runtime = "nodejs"`. POST validates token before insert; unique-index dupe → 409
+- `app/portals/page.tsx` + `portal-form.tsx` — server list + client form. Red badge for `env: production` per F1
+- `app/page.tsx` — home page linking to `/portals`; other sections shown as disabled placeholders
+- `supabase/migrations/20260915000000_init.sql` — DDL for all 6 phase-1 tables + `set_updated_at()` trigger. Applied against the cloud project; verify via `pnpm spike scripts/spike/12-supabase-ping.ts`
 
 ## Stack
 
@@ -20,7 +43,7 @@ Phase 0 spike complete. No feature code (`lib/hubdb/`, `lib/graph.ts`, `app/api/
 - pnpm (pinned via `packageManager` in `package.json`)
 - ESLint 9 flat config (`eslint.config.mjs`)
 - **No `src/` dir** — `app/`, `components/`, `lib/`, `workers/` sit at the repo root (matches PRD §9 layout)
-- **No test runner installed yet.** Pick one before writing tests — Vitest is the low-friction default with Next.js.
+- **Vitest 5** as the test runner, colocated `*.test.ts` next to source (not a `tests/` dir). Deps: `@supabase/supabase-js`, `ws` (Node 20 WebSocket polyfill), `zod`
 
 ## Commands
 
@@ -29,16 +52,25 @@ pnpm dev                                  # next dev
 pnpm build                                # next build
 pnpm start                                # next start (prod, after build)
 pnpm lint                                 # eslint
+pnpm test                                 # vitest watch
+pnpm test:run                             # vitest one-shot
 pnpm exec tsc --noEmit                    # typecheck without emit
 pnpm dlx shadcn@latest add <component>    # add a shadcn/ui component
 
-# Phase-0 spike scripts — reads .env.local (HUBSPOT_TOKEN required)
+# Spike scripts — read .env.local (HUBSPOT_TOKEN required for hubdb ones)
 pnpm spike scripts/spike/00-ping.ts                # list tables via v3 + dated API
 pnpm spike scripts/spike/01-provision-foreign.ts   # create brands + categories (idempotent)
 pnpm spike scripts/spike/02-provision-main.ts      # create products with FK columns
 pnpm spike scripts/spike/03-insert-foreign.ts      # batch-insert 200 rows into each foreign
 pnpm spike scripts/spike/04-insert-main.ts         # batch-insert 200 linked products
 pnpm spike scripts/spike/05-publish.ts             # push-live in dependency order
+pnpm spike scripts/spike/06-patch-semantics.ts     # PATCH sanity — first attempt on root path (returns 401)
+pnpm spike scripts/spike/07-patch-auth.ts          # PATCH auth isolation across bases + methods
+pnpm spike scripts/spike/08-patch-draft.ts         # discovered /tables/{id}/draft is the write path
+pnpm spike scripts/spike/09-patch-draft-semantics.ts   # hit the getTable/live paradox
+pnpm spike scripts/spike/10-patch-draft-truth.ts   # verified full-replace via GET /draft + push-live
+pnpm spike scripts/spike/11-provision-update.ts    # end-to-end diffSchema → provision → verify
+pnpm spike scripts/spike/12-supabase-ping.ts       # counts rows in all 6 Supabase tables
 pnpm spike scripts/spike/99-inspect.ts             # draft vs live row counts
 ```
 
@@ -83,6 +115,9 @@ Non-negotiable rules baked into the PRD:
 - **Batch mutations live under `/rows/draft/batch/{create,update,purge}`** — the top-level `/rows/batch/create` returns an HTML 404 from the edge. Always include the `draft` segment (F0-5)
 - **Reads:** `/rows/draft` for draft state, `/rows` for live. `publishedAt: "1970-01-01T00:00:00Z"` is the null-sentinel for "never published" (F0-9)
 - **Row IDs are strings in a single global namespace across all tables** (12-digit HubSpot ids). Column IDs are per-table sequential integers — never compare column ids across tables. Wrapper must normalize all ids to strings on ingest (list endpoints return table `id` as string, FK columns echo `foreignTableId` as number) (F0-4)
+- **Table schema mutations also live under `/draft`** — `PATCH /tables/{id}/draft`, not `/tables/{id}`. The root path returns HTTP 401 with a misleading "service-to-service not engaged" body. Use `patchTable` from `lib/hubdb/tables.ts` — never build the path by hand (F0-10)
+- **`PATCH /tables/{id}/draft` is FULL-REPLACE on the `columns` array** — sending only new columns silently drops existing ones. Always send `portal.columns + new columns` (existing ids preserved). `lib/hubdb/provision.ts` does this correctly; hand-rolled PATCHes will destroy schemas if they're not careful (F0-11)
+- **`GET /tables/{id}` returns the LIVE view, not the draft** — use `getDraftTable` from `lib/hubdb/tables.ts` when diffing or verifying pending schema changes (F0-12)
 
 ## Foreign ID wire format
 

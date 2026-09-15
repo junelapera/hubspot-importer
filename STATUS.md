@@ -4,15 +4,16 @@ Running log of where the HubDB Importer project is, what's in flight, and what's
 
 ## Current state — 2026-09-15
 
-**Phase:** 1 — MVP (in progress; core lib layer complete)
+**Phase:** 1 — MVP (in progress; core lib layer complete, F1 shipped end-to-end)
 
-**Blocked on:** a Supabase cloud project. User picked "Cloud project" for the Supabase-mode question — needs to create the project at supabase.com, paste `SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY` into `.env.local`, and paste `supabase/migrations/20260915000000_init.sql` into the dashboard SQL Editor. Once done, F1 API routes can be built + smoke-tested. Code side is unblocked in the meantime.
+**Blocked on:** nothing. Supabase is live (all 6 tables reachable via `12-supabase-ping.ts`). F1 (portal connection) works end-to-end: `POST /api/portals` validates the token against HubSpot, encrypts, stores; `GET /api/portals` returns the client-safe list; `/portals` page renders the picker with sandbox/prod badge. First real portal ("Dev sandbox", hub 51706903) landed in the DB during verification.
 
 **Next up (unblocked):**
-- F1 API routes (`POST /api/portals`, `GET /api/portals`) + typed portal repo (`lib/db/portals.ts`) — API code can be written against an unavailable DB; will fail loudly at runtime until Supabase is configured.
-- Portal picker UI (`app/portals/page.tsx`) with sandbox/prod badge.
-- End-to-end sandbox integration spike for the importer.
+- **F2 — Source ingestion.** CSV / JSON upload endpoint + parse, delimiter/encoding/header detection, preview UI, validation warnings.
+- **F3 — Portal introspection UI.** Fetch draft schemas for the selected portal; render tables + columns + row counts.
+- End-to-end sandbox integration spike for the importer (`provision → importRows → push-live`).
 - Rate-limit stress test (still-open Phase-0 question).
+- Node 22 upgrade (Supabase-js emits a deprecation warning under Node 20 on every call; ws polyfill keeps it functional but the runtime warning is loud).
 
 ### What exists
 - Next.js 16 App Router scaffold (TypeScript, Tailwind v4, ESLint 9, pnpm)
@@ -28,9 +29,16 @@ Running log of where the HubDB Importer project is, what's in flight, and what's
   - `lib/hubdb/import.ts` — F8 execution layer. `importRows(ops, {schema, tableIds, source})` runs in topological order (`toposortOrThrow` on the schema graph): per table, fetch existing draft rows → build keyMap on naturalKey (dupe + 10k-cap pre-flight via `ImportPreflightError`) → for each source row, resolve FK columns using previously-populated tables' key maps → split into insert/update by naturalKey lookup → batch update, then batch insert at 100/call. Newly-inserted row ids fold back into the key map so downstream tables resolve correctly. Injectable `ImportOps`; `opsFromClientForImport(client)` builds the real one. `onMissing='fail'` per-row (skip + log, other rows continue); other policies + stale-ID retry + cancel signal noted as follow-ups. Assumes `foreignColumn === target.naturalKey` (the `resolveDefaults` happy path)
   - `lib/crypto.ts` — AES-256-GCM `encrypt(plaintext) → base64` / `decrypt(base64) → plaintext`. Single output string encodes `iv || tag || ciphertext`. Reads `PORTAL_TOKEN_ENCRYPTION_KEY` (base64, 32 bytes) from env; throws with a clear message on missing / wrong length. `generateEncryptionKey()` helper for one-shot key generation. 10 vitest cases (roundtrip, unicode, IV freshness, bit-flip rejection via GCM auth tag, truncation, wrong-key rejection, missing-env, wrong-length-key)
   - `lib/db/supabase.ts` — `createSupabaseServerClient()` factory using `SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY`. Server-only (bypasses RLS); `auth: { persistSession: false, autoRefreshToken: false }` for request-scoped use. Untyped `SupabaseClient` for now — typed repos will layer on top in F1
-  - `supabase/migrations/20260915000000_init.sql` — full DDL for the 6 Phase-1 tables (`portals`, `mappings`, `jobs`, `job_batches`, `job_errors`, `key_maps`) plus a shared `set_updated_at()` trigger and `pgcrypto`. Paste into the Supabase dashboard SQL Editor to apply (no local CLI in v1; filename follows the CLI's timestamp convention for later adoption)
-  - `.env.example` — refreshed with the new SUPABASE_* and PORTAL_TOKEN_ENCRYPTION_KEY blocks; the old HUBSPOT_* vars are now scoped as "spike scripts only" (once F1 lands, portals live in Supabase)
-  - `vitest` — 5.0.1 installed; suites colocated with source (`lib/graph.test.ts`, `lib/schema.test.ts`, `lib/resolve.test.ts`, `lib/crypto.test.ts`, `lib/hubdb/provision.test.ts`, `lib/hubdb/import.test.ts`); `pnpm test` / `pnpm test:run`. 85 cases across 6 suites, all green
+  - `supabase/migrations/20260915000000_init.sql` — full DDL for the 6 Phase-1 tables (`portals`, `mappings`, `jobs`, `job_batches`, `job_errors`, `key_maps`) plus a shared `set_updated_at()` trigger. Applied against the cloud project on 2026-09-15. Paste-into-SQL-Editor workflow; needs the role selector on `postgres` (F1-scaffold finding). Filename follows the Supabase CLI's timestamp convention for later adoption
+  - `.env.example` — SUPABASE_* + PORTAL_TOKEN_ENCRYPTION_KEY blocks with generation instructions; the old HUBSPOT_* vars are scoped as "spike scripts only" (app code reads tokens from the `portals` table via `getPortalToken`)
+  - `lib/hubdb/introspection.ts` — `validateHubdbToken(token)` probes `/tables?limit=1` with retry disabled. Returns `{ok:true, scopes:["hubdb"]}` on 200; `{ok:false, error, status:401}` on 401 with a specific "invalid or missing hubdb scope" message; generic error with status + body preview for other 4xx/5xx. 3 vitest cases via fetch injection
+  - `lib/db/portals.ts` — typed portal repo. `PortalRow` (server-only, includes ciphertext) vs `PortalSummary` (client-safe, no token). Functions: `createPortal(client, input)` (encrypts token via `lib/crypto`), `listPortals(client)`, `getPortalById(client, id)`, `getPortalToken(client, id)` (server-only decrypt), `deletePortal(client, id)`. All take `SupabaseClient` as first arg
+  - `app/api/portals/route.ts` — `GET` returns `{ portals: PortalSummary[] }`; `POST` validates body with zod, calls `validateHubdbToken` (400 on failure), inserts, returns `201 { portal }`. `runtime = "nodejs"` (needs `node:crypto` and the `ws` polyfill). Unique-index violation on `(label, env)` is rewritten to a 409 with a friendly message
+  - `app/portals/page.tsx` + `app/portals/portal-form.tsx` — server component lists portals directly via `listPortals`; client `PortalForm` posts to `/api/portals`, calls `router.refresh()` on success. Env badge is red for production, muted for sandbox. `runtime = "nodejs"` + `dynamic = "force-dynamic"` on the page
+  - `app/page.tsx` — replaced the create-next-app template with a real home page linking to `/portals` (ready) and disabled placeholders for Mappings / Runs / Results
+  - `lib/db/supabase.ts` — Node 20 polyfill for the WebSocket global: `import { WebSocket } from "ws"` set as `globalThis.WebSocket` when missing. Required by Supabase-js 2.116+'s RealtimeClient constructor. Retire when we upgrade to Node 22
+  - `ws` (+ `@types/ws`) added as dependencies for the polyfill above
+  - `vitest` — 5.0.1; suites colocated with source (`lib/graph.test.ts`, `lib/schema.test.ts`, `lib/resolve.test.ts`, `lib/crypto.test.ts`, `lib/hubdb/introspection.test.ts`, `lib/hubdb/provision.test.ts`, `lib/hubdb/import.test.ts`). `pnpm test` / `pnpm test:run`. **88 cases across 7 suites, all green**. tsc clean
 - Git: `main` tracking `origin/main` at https://github.com/junelapera/hubspot-importer
 
 ### In flight — Phase 1 foundations
@@ -49,12 +57,15 @@ Running log of where the HubDB Importer project is, what's in flight, and what's
 | 11 | `lib/resolve.ts` — key map builder + FK resolver (F8) | done — 24 cases (normalize + split + build map w/ duplicates + resolve all-or-nothing + dedupe + multi-value) |
 | 12 | `lib/hubdb/import.ts` — F8 execution (pass-1 upsert foreign, pass-2 main w/ resolved FKs, batching, retry) | done — 11 cases; ImportPreflightError for dupes + 10k cap; RowError for per-row failures |
 | 13 | End-to-end sandbox spike for the importer (`provision → importRows → push-live`) | pending |
-| 14 | Supabase project + 6 phase-1 tables — SQL migration written; user needs to create cloud project + apply | code done; awaiting cloud project + env vars |
+| 14 | Supabase project + 6 phase-1 tables applied | done — verified via `12-supabase-ping.ts`, all 6 tables reachable |
 | 15 | `lib/crypto.ts` — AES-256-GCM encryption for portal tokens | done — 10 cases |
-| 16 | `lib/db/supabase.ts` — server-side client factory | done |
-| 17 | F1 portal-connection API + typed portal repo + picker UI | pending |
-| 18 | Rate-limit stress test (still-open Phase-0 question) | pending |
-| 19 | Long-job runner strategy (still-open Phase-0 question) | pending |
+| 16 | `lib/db/supabase.ts` — server-side client factory | done — includes Node 20 `ws` polyfill |
+| 17 | F1 portal-connection API + typed portal repo + picker UI | done — validated end-to-end against real Supabase + real HubSpot (POST 201, GET 200, dupe → 409, bad token → 400) |
+| 18 | F2 — source ingestion (CSV/JSON upload + parse + preview) | pending |
+| 19 | F3 — portal introspection UI (schemas, published/draft state, row counts) | pending |
+| 20 | Node 20 → 22 upgrade (retire the `ws` polyfill) | pending |
+| 21 | Rate-limit stress test (still-open Phase-0 question) | pending |
+| 22 | Long-job runner strategy (still-open Phase-0 question) | pending |
 
 ### Archived — Phase 0 tasks
 | # | Task | Status |
@@ -138,6 +149,21 @@ HubL render (last item in phase-0 checklist) deferred — do manually in HubSpot
 - **Blocked on user action for full validation:** creating the Supabase cloud project + applying the SQL migration + pasting env vars. Code side is unblocked — F1 API routes can be written and typechecked against this scaffolding; they'll fail with a clear message at runtime if Supabase isn't configured
 - 85 cases across 6 suites still green. tsc clean
 - **Next step:** F1 API routes (`POST /api/portals`, `GET /api/portals`) + `lib/db/portals.ts` typed repo + portal picker page
+
+- **Supabase applied, F1 shipped end-to-end.** User created the cloud project + applied the migration via the SQL Editor. After a small speed bump (`25006 read-only transaction` — root cause was the SQL Editor's role selector being on a non-`postgres` role), all 6 tables came up green
+- Wrote `scripts/spike/12-supabase-ping.ts` — counts rows in each of the 6 phase-1 tables via the server client. First run failed with `Node.js detected but native WebSocket not found` from supabase-js's Realtime constructor. Fix: installed `ws` (+`@types/ws`) and set `globalThis.WebSocket = WsWebSocket` at the top of `lib/db/supabase.ts` when the global is missing. Ping then reported all 6 tables reachable, 0 rows each. Deprecation warning for Node 20 surfaces on every Supabase call — not fatal; upgrade to Node 22 tracked as task #20
+- Wrote `lib/hubdb/introspection.ts` — `validateHubdbToken(token)` hits `/tables?limit=1` with retry disabled. 200 → `{ok:true, scopes:["hubdb"]}`. 401 → `{ok:false, status:401, error:"…invalid or missing hubdb scope"}`. Other errors → generic status + body preview. Can't introspect private-app scopes via the HubSpot API, so the `["hubdb"]` scope is inferred from success. Fetch-injection tested (3 cases)
+- Wrote `lib/db/portals.ts` — typed repo. Split `PortalRow` (server-only, includes `token_ciphertext`) from `PortalSummary` (client-safe, no token). Functions: `createPortal` (encrypts token via `lib/crypto`), `listPortals`, `getPortalById`, `getPortalToken` (server-only decrypt), `deletePortal`. All take a `SupabaseClient` as first arg
+- Wrote `app/api/portals/route.ts` — `runtime = "nodejs"`. GET returns `{ portals }`. POST validates body with zod, calls `validateHubdbToken` (400 with the HubSpot status echoed on failure), inserts. Unique-index violation on `(label, env)` is caught and rewritten to a 409 with a friendly message
+- Wrote `app/portals/page.tsx` (server component, `dynamic = "force-dynamic"`) + `app/portals/portal-form.tsx` (client). Env badge is red for production per F1. Form posts to `/api/portals`, then `router.refresh()` — no client-side state duplication. Replaced the create-next-app template on `app/page.tsx` with a real home page linking to `/portals` (ready) + disabled placeholders for Mappings / Runs / Results
+- **End-to-end verification against real Supabase + real HubSpot:**
+  - GET `/api/portals` → 200, empty list
+  - POST `/api/portals` with the real `HUBSPOT_TOKEN` → **201**, portal created with `scopes: ["hubdb"]`, row landed in Supabase
+  - GET `/api/portals` → 200, one portal (token not echoed)
+  - POST with fake token → **400**, `"Token is invalid or missing the required hubdb scope"`
+  - POST duplicate `(label, env)` → **409**, friendly message from unique-index catch
+  - GET `/portals` (HTML) → 200, portal rendered with sandbox badge + Hub 51706903
+- **Next step:** F2 (source ingestion — CSV / JSON upload + parse + preview + validation warnings), then either F3 (portal introspection UI) or the end-to-end importer spike
 
 ### 2026-09-14
 - `.env.local` provisioned with `HUBSPOT_TOKEN` — spike unblocked

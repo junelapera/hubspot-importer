@@ -2,7 +2,7 @@
 
 Self-hosted Next.js tool that imports relational data into HubSpot HubDB — resolving `FOREIGN_ID` columns automatically from human-readable natural keys (SKU, slug, name) so a `products → brands + categories` dataset lands in one pass instead of hours of manual clicking in the HubDB UI.
 
-**Status:** Phase 1 (MVP) in progress — full lib layer (wrapper, graph, schema, provisioner, resolver, importer) is shipped and tested; app/UI layer is next. See [`STATUS.md`](./STATUS.md) for current state.
+**Status:** Phase 1 (MVP) in progress. Full lib layer shipped + tested (88 vitest cases, 7 suites). F1 (portal connection) live at `/portals` — Supabase migration applied, encrypted token storage, sandbox/prod badge. F2–F10 pending. See [`STATUS.md`](./STATUS.md) for current state.
 
 ## Docs
 

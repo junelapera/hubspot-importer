@@ -1,4 +1,13 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import { WebSocket as WsWebSocket } from "ws";
+
+// Supabase 2.116+ requires a WebSocket constructor for its Realtime client.
+// Node 22+ ships one globally; Node 20 (what we run under) does not, so we
+// polyfill with `ws`. The Realtime client is instantiated by createClient()
+// even when we only use CRUD, so this can't be avoided by skipping realtime.
+if (typeof (globalThis as { WebSocket?: unknown }).WebSocket === "undefined") {
+  (globalThis as { WebSocket?: unknown }).WebSocket = WsWebSocket;
+}
 
 const SUPABASE_URL_ENV = "SUPABASE_URL";
 const SUPABASE_SERVICE_ROLE_KEY_ENV = "SUPABASE_SERVICE_ROLE_KEY";
