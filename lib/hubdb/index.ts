@@ -48,3 +48,15 @@ export {
   listLiveRowsPage,
 } from "./rows";
 export type { RowReadOptions } from "./rows";
+
+export {
+  opsFromClient,
+  provision,
+  ProvisionConflictError,
+} from "./provision";
+export type {
+  ProvisionEvent,
+  ProvisionOps,
+  ProvisionOptions,
+  ProvisionResult,
+} from "./provision";
