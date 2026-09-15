@@ -2,15 +2,19 @@
 --
 -- We're on Supabase cloud (no local CLI in v1). To apply this migration:
 --   1. Open your project's SQL Editor in the Supabase dashboard
---   2. Paste the contents of this file and run
---   3. Keep this file checked in as the source of truth; hand-edit it before
---      any subsequent SQL run and paste again
+--   2. **Toggle "Read only" OFF** at the top of the editor (DDL fails with
+--      "25006: cannot execute … in a read-only transaction" otherwise)
+--   3. Paste the contents of this file and run
+--   4. Keep this file checked in as the source of truth; hand-edit it
+--      before any subsequent SQL run and paste again
 --
--- When we adopt the Supabase CLI later, this file's filename already follows
--- the CLI's timestamped-migration convention (YYYYMMDDHHMMSS_name.sql).
-
--- gen_random_uuid()
-CREATE EXTENSION IF NOT EXISTS pgcrypto;
+-- No CREATE EXTENSION is needed. `gen_random_uuid()` has been in Postgres
+-- core since 13 (Supabase runs 15+). Enabling pgcrypto from the SQL Editor
+-- requires superuser and fails — Supabase pre-installs it in the
+-- `extensions` schema anyway if we ever need `crypt()` / `digest()`.
+--
+-- When we adopt the Supabase CLI later, this file's filename already
+-- follows the CLI's timestamped-migration convention (YYYYMMDDHHMMSS_name.sql).
 
 -- ─── portals ──────────────────────────────────────────────────────────────
 -- One row per HubSpot portal the user has connected. Token stored encrypted
