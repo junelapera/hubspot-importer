@@ -29,6 +29,7 @@ export { PUBLISHED_AT_EPOCH, isPublished } from "./types";
 
 export {
   createTable,
+  getDraftTable,
   getTable,
   listTables,
   patchTable,

@@ -6,12 +6,12 @@ Running log of where the HubDB Importer project is, what's in flight, and what's
 
 **Phase:** 1 — MVP (in progress; core lib layer complete)
 
-**Blocked on:** nothing. Wrapper + graph + schema + provisioner are all shipped, typechecked, and tested (40 vitest cases, 3 suites). Spike scripts re-pass against the sandbox.
+**Blocked on:** nothing. Wrapper + graph + schema + provisioner are all shipped, typechecked, and tested (40 vitest cases, 3 suites). Spike scripts re-pass against the sandbox. PATCH-semantics validated end-to-end and the provisioner smoke-tests against a real sandbox table (`scripts/spike/11-provision-update.ts`).
 
 **Next up (unblocked):**
-- **Validate the PATCH-as-full-replace assumption** the provisioner bakes in (add a spike script or a sandbox integration test). Cheapest thing to de-risk before Supabase/UI work.
 - `lib/resolve.ts` (F8 — key-map builder + FK resolver for the importer).
 - F1 portal-connection API + Supabase scaffolding (starts the app-layer work).
+- Rate-limit stress test (still-open Phase-0 question).
 
 ### What exists
 - Next.js 16 App Router scaffold (TypeScript, Tailwind v4, ESLint 9, pnpm)
@@ -22,7 +22,7 @@ Running log of where the HubDB Importer project is, what's in flight, and what's
   - `lib/hubdb/` — typed HubDB wrapper: `createHubdbClient()` factory with 429/5xx retry + `Retry-After` handling; id normalization (all ids returned as strings); typed operations for tables (`list/get/create/patch/pushLive`) and rows (`listAll{Draft,Live}Rows`, `batch{Create,Update,Purge}DraftRows`); `/rows/draft/batch/*` path shape hard-enforced (F0-5), 100-row cap asserted (F0-6)
   - `lib/graph.ts` — directed dependency graph shared by provisioner/importer/publisher: `toposort()`, `toposortOrThrow()` (F6 "reject with clear message"), `breakCycles()` (F6 "offer two-phase write") with deferred-edge output for column-less create + PATCH-in strategy; converters from `HubdbTableInput` and `HubdbTable`; iterative Tarjan's SCC for cycle detection
   - `lib/schema.ts` — schema-file parser (zod) + cross-ref validator (surfaces all issues at once, not fail-first) + `resolveDefaults` (FK `foreignColumn` defaults to target's single-column `naturalKey`) + `diffSchema` returning per-table `create | match | update | conflict` (never emits drop or retype — F3)
-  - `lib/hubdb/provision.ts` — topological two-phase provisioner. Takes an injectable `ProvisionOps` adapter (not the raw client) for testability; `opsFromClient(client)` builds the real one. Self-references included in the graph so `breakCycles` catches them. Phase 2 groups deferred edges by source and PATCHes the missing FK columns in per table. **Conservative PATCH assumption**: sends `portal.columns + new columns` (existing ids preserved) — safe if HubDB PATCH is full-replace *or* merge, but not yet validated against the sandbox
+  - `lib/hubdb/provision.ts` — topological two-phase provisioner. Takes an injectable `ProvisionOps` adapter (not the raw client) for testability; `opsFromClient(client)` builds the real one. Self-references included in the graph so `breakCycles` catches them. Phase 2 groups deferred edges by source and PATCHes the missing FK columns in per table. **Sends `portal.columns + new columns` on every PATCH** (existing ids preserved) — validated as REQUIRED by F0-11: HubDB PATCH is full-replace; sending only new columns silently destroys the schema
   - `vitest` — 5.0.1 installed; suites colocated with source (`lib/graph.test.ts`, `lib/schema.test.ts`, `lib/hubdb/provision.test.ts`); `pnpm test` / `pnpm test:run`. 40 cases across 3 suites, all green
 - Git: `main` tracking `origin/main` at https://github.com/junelapera/hubspot-importer
 
@@ -38,7 +38,7 @@ Running log of where the HubDB Importer project is, what's in flight, and what's
 | 7 | Test runner — Vitest installed; suites colocated with source | done — `pnpm test:run`, 40 cases green |
 | 8 | `lib/schema.ts` — parse + validate schema file, diff vs portal | done — 21 cases (parse failure modes + every diff verdict incl. FK conflicts) |
 | 9 | `lib/hubdb/provision.ts` — compose wrapper + graph into topological provisioner (name-based FK happy path from F0-2) | done — self-loop + 2-cycle break paths tested via fake ops |
-| 10 | **Validate PATCH-as-full-replace assumption** in `provision.ts` against the sandbox | pending — de-risk before broader wiring |
+| 10 | Validate PATCH-as-full-replace assumption in `provision.ts` against the sandbox | done — F0-10/11/12; `patchTable` path bug fixed, `getDraftTable` added, end-to-end integration spike passes |
 | 11 | `lib/resolve.ts` — key map builder + FK resolver (F8) | pending |
 | 12 | Supabase project + `portals` / `mappings` / `jobs` / `job_batches` / `job_errors` / `key_maps` tables | pending |
 | 13 | F1 portal-connection API + encrypted token storage | pending |
@@ -97,6 +97,15 @@ HubL render (last item in phase-0 checklist) deferred — do manually in HubSpot
 - **PATCH semantics conservatism.** The provisioner sends `portal.columns + new columns` on every PATCH (existing ids preserved). Safe assumption if HubDB PATCH is either full-replace *or* merge — but not yet validated against the sandbox. Added a Phase-1 task to spike this before broader wiring
 - **Bug shaken out in provisioner:** initial version filtered `col.foreignTable !== name` when building deps, so self-loops were invisible to the graph and got sent to `createTable` with the self-referencing FK column intact. Caught by the self-loop test on first run; fix was one line
 - **Next step:** validate PATCH semantics against the sandbox, then either `lib/resolve.ts` (F8) or start the F1 portal-connection API + Supabase scaffolding
+
+- Ran the PATCH-semantics validation. **Three new findings** (F0-10 through F0-12, documented in the Phase-1 addendum of `phases/phase-0-spike.md`):
+  - **F0-10** — `PATCH /tables/{id}` returns HTTP **401** with a misleading "service-to-service not engaged" body (no hint that the path is wrong). The correct endpoint is `PATCH /tables/{id}/draft` — schema mutations live under the draft namespace, extending F0-5's rows pattern to tables. `PUT` and dated-base PATCH cleanly 405; only v3 PATCH on the root gives the confusing 401
+  - **F0-11** — `PATCH /tables/{id}/draft` is **full-replace** on the `columns` array. Sending only new columns drops the existing ones. Sending a subset drops the omitted ones. Push-live promotes whatever the draft says. **This confirms the provisioner's `portal.columns + new columns` approach was correct — sending only new columns would silently destroy schemas.** The PRD §F3 "never drop or retype" rule is enforced by our code, not the API
+  - **F0-12** — `GET /tables/{id}` returns the LIVE view, not the draft. After PATCH /draft, GET stays on pre-PATCH state until push-live. Callers that need to see pending schema changes (diff, verify) must use `GET /tables/{id}/draft`
+- **Live bug fixed in `lib/hubdb/tables.ts::patchTable`** — was hitting `/tables/{ref}` (guaranteed 401 in production). Now `/tables/{ref}/draft`. Added `getDraftTable(client, ref)` and exported it from the barrel. All 40 vitest cases still green (fake ops don't care about paths)
+- **End-to-end integration test**: `scripts/spike/11-provision-update.ts` creates a throwaway table with 2 columns, parses a 3-column schema, diffs against the draft, runs `provision(opsFromClient(client), plan)`, verifies the draft ends up with the expected columns. Passed on first run after the path fix
+- **Spike scripts 06–11 added** as the trace of the investigation. Kept in-tree for future reference; they're throwaway but tell the debugging story
+- **Next step:** `lib/resolve.ts` (F8, key-map builder + FK resolver) or start F1 portal-connection API + Supabase scaffolding — no more open assumptions in the lib layer
 
 ### 2026-09-14
 - `.env.local` provisioned with `HUBSPOT_TOKEN` — spike unblocked

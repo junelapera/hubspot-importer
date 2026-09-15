@@ -61,6 +61,11 @@ export async function getTable(client: HubdbClient, ref: TableRef): Promise<Hubd
   return normalizeTable(raw);
 }
 
+export async function getDraftTable(client: HubdbClient, ref: TableRef): Promise<HubdbTable> {
+  const raw = await client.request<RawTable>(`/tables/${encodeURIComponent(ref)}/draft`);
+  return normalizeTable(raw);
+}
+
 export async function createTable(
   client: HubdbClient,
   input: HubdbTableInput,
@@ -77,7 +82,7 @@ export async function patchTable(
   ref: TableRef,
   patch: HubdbTablePatch,
 ): Promise<HubdbTable> {
-  const raw = await client.request<RawTable>(`/tables/${encodeURIComponent(ref)}`, {
+  const raw = await client.request<RawTable>(`/tables/${encodeURIComponent(ref)}/draft`, {
     method: "PATCH",
     body: patch,
   });

@@ -89,3 +89,26 @@ Unpublished tables (and rows) return `publishedAt: "1970-01-01T00:00:00Z"` — t
 - **Batch endpoint path:** always `/rows/draft/batch/{create,update,purge}` — never omit the `draft` segment
 - **Row-id space:** global integer namespace, strings in wrapper types, no per-table scoping
 - **Publish order:** topological, foreign tables first, enforced by `lib/graph.ts`
+
+## Phase-1 addendum: PATCH validation (2026-09-15)
+
+Phase 0 did not touch `PATCH /tables/{id}` — the spike only exercised POST/GET/DELETE. When `lib/hubdb/provision.ts` needed to add columns to existing tables, we ran a follow-up spike series (`scripts/spike/06`–`10`) to validate the wrapper's PATCH path and semantics. Three findings extend the Phase-0 canon:
+
+### F0-10: Table mutations live under `/draft` (extends F0-5)
+- `PATCH /tables/{id}` returns **HTTP 401 with a misleading "service-to-service not engaged" body** — no hint that the path is wrong. On the dated base the same request returns a clean 405; PUT and POST on either path also 405
+- **Correct endpoint:** `PATCH /tables/{id}/draft`. Same pattern as rows (F0-5): schema mutations live under the draft namespace
+- **Locked in:** all table-modifying calls in `lib/hubdb/` route through `/draft`. `lib/hubdb/tables.ts::patchTable` was updated after this discovery — the initial implementation would have blown up in production with a 401 that looked like an auth failure
+
+### F0-11: PATCH `/tables/{id}/draft` is FULL-REPLACE on `columns`
+- Sending only new columns → **existing columns are dropped in the draft**
+- Sending a subset of existing columns → the omitted ones are **dropped**
+- Push-live promotes whatever the draft contains
+- **Locked in:** the provisioner (`lib/hubdb/provision.ts`) sends `portal.columns + new columns` (existing ids preserved) on every PATCH. Sending only additions would have silently destroyed schemas. The PRD §F3 "never drop or retype in v1" rule is enforced by *our code*, not by the API
+
+### F0-12: `GET /tables/{id}` returns the LIVE view, not the draft
+- After PATCH /draft, GET /tables/{id} continues to show the pre-PATCH state until push-live
+- For a table that has never been published, GET still returns *something* — appears to be the initial creation state, not the current draft. This surprised us and cost time interpreting spike results
+- **Locked in:** callers that need to see pending draft changes (diffing schema against portal for provisioning, verifying a mutation landed) must use `GET /tables/{id}/draft`. Added `lib/hubdb/tables.ts::getDraftTable` for this purpose. `listTables` and `getTable` retain live semantics for now
+
+### End-to-end verification
+`scripts/spike/11-provision-update.ts` runs the full `parseSchema → diffSchema → provision` chain against the sandbox on a throwaway table. Confirmed on 2026-09-15: adding a column via the provisioner produces the expected draft state.
