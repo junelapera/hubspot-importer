@@ -67,13 +67,13 @@
 - [ ] Download unresolved-references CSV
 
 ## F8 — Execution
-- [ ] `lib/resolve.ts` — key map builder + foreign resolution
-- [ ] Pass 1: upsert foreign tables; fetch all existing rows (paginated) into key map
-- [ ] Pass 2: main table rows with FK cell values as `[{ id, type: "foreignid" }]`
-- [ ] Batch at 100 rows per API call
-- [ ] Upsert: PATCH matches, POST rest (matched by natural key)
+- [x] `lib/resolve.ts` — key map builder + foreign resolution
+- [x] Pass 1: upsert foreign tables; fetch all existing rows (paginated) into key map
+- [x] Pass 2: main table rows with FK cell values as `[{ id, type: "foreignid" }]`
+- [x] Batch at 100 rows per API call
+- [x] Upsert: PATCH matches, POST rest (matched by natural key)
 - [ ] Persist job + batch cursor to Supabase
-- [ ] Retry on 429/5xx with exponential backoff, honor `Retry-After`
+- [x] Retry on 429/5xx with exponential backoff, honor `Retry-After` (wrapper-level)
 - [ ] Throttle to stay under request-per-10s ceiling
 - [ ] Cancel button — stops at batch boundary
 - [ ] Runner separate from request handler (SSE subscriber, closing tab doesn't kill job)
@@ -91,19 +91,19 @@
 - [ ] Job history list: mapping name, portal, timestamp, outcome
 
 ## Foreign key resolution correctness (Section 8)
-- [ ] Normalize function: trim → collapse ws → casefold; record exact function in job log
-- [ ] Abort validation on duplicate natural keys in foreign source
-- [ ] Deduplicate repeated foreign values within a single main cell
-- [ ] Empty FK cell → empty array (not null)
+- [x] Normalize function: trim → collapse ws → casefold; record exact function in job log (`DEFAULT_NORMALIZE` in `lib/resolve.ts`)
+- [x] Abort validation on duplicate natural keys in foreign source (`ImportPreflightError`)
+- [x] Deduplicate repeated foreign values within a single main cell (`resolveForeignValue` dedupes by default)
+- [x] Empty FK cell → empty array (not null)
 - [ ] Detect stale ID on write error → re-resolve once, then report
-- [ ] Self-reference tables treated as cycle
-- [ ] Block with explicit error when foreign table reaches 10k rows
+- [x] Self-reference tables treated as cycle (graph handles; provisioner defers)
+- [x] Block with explicit error when foreign table reaches 10k rows (`ImportPreflightError` pre-flight)
 
 ## Constraint enforcement (Section 10)
-- [ ] Enforce rows/table (10k), text (10k chars), rich text (65k chars)
-- [ ] Enforce batch size (100)
+- [x] Enforce rows/table (10k) — importer pre-flight; text (10k chars), rich text (65k chars) still TBD
+- [x] Enforce batch size (100) — asserted in `lib/hubdb/rows.ts` and chunked in importer
 - [ ] Enforce lowercase dynamic page paths
-- [ ] Paginate reads (1000-row default page size)
+- [x] Paginate reads (1000-row default page size)
 
 ## SSE progress
 - [ ] `GET /api/jobs/[id]/stream` — SSE endpoint

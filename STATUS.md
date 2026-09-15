@@ -6,10 +6,10 @@ Running log of where the HubDB Importer project is, what's in flight, and what's
 
 **Phase:** 1 — MVP (in progress; core lib layer complete)
 
-**Blocked on:** nothing. Wrapper + graph + schema + provisioner + resolver are all shipped, typechecked, and tested (64 vitest cases, 4 suites). Spike scripts re-pass against the sandbox. PATCH-semantics validated end-to-end and the provisioner smoke-tests against a real sandbox table (`scripts/spike/11-provision-update.ts`).
+**Blocked on:** nothing. Wrapper + graph + schema + provisioner + resolver + importer are all shipped, typechecked, and tested (75 vitest cases, 5 suites). Spike scripts re-pass against the sandbox. PATCH-semantics validated end-to-end and the provisioner smoke-tests against a real sandbox table (`scripts/spike/11-provision-update.ts`).
 
 **Next up (unblocked):**
-- `lib/hubdb/import.ts` — F8 execution: pass-1 upsert foreign tables (batch) + build key maps, pass-2 main table with resolved FKs. Composes `lib/hubdb/`, `lib/schema`, `lib/graph`, and `lib/resolve`.
+- End-to-end sandbox integration spike for the importer (analogous to `11-provision-update.ts`) — smoke-test the full `provision → importRows → push-live` chain against real HubDB.
 - F1 portal-connection API + Supabase scaffolding (starts the app-layer work).
 - Rate-limit stress test (still-open Phase-0 question).
 
@@ -24,7 +24,8 @@ Running log of where the HubDB Importer project is, what's in flight, and what's
   - `lib/schema.ts` — schema-file parser (zod) + cross-ref validator (surfaces all issues at once, not fail-first) + `resolveDefaults` (FK `foreignColumn` defaults to target's single-column `naturalKey`) + `diffSchema` returning per-table `create | match | update | conflict` (never emits drop or retype — F3)
   - `lib/hubdb/provision.ts` — topological two-phase provisioner. Takes an injectable `ProvisionOps` adapter (not the raw client) for testability; `opsFromClient(client)` builds the real one. Self-references included in the graph so `breakCycles` catches them. Phase 2 groups deferred edges by source and PATCHes the missing FK columns in per table. **Sends `portal.columns + new columns` on every PATCH** (existing ids preserved) — validated as REQUIRED by F0-11: HubDB PATCH is full-replace; sending only new columns silently destroys the schema
   - `lib/resolve.ts` — low-level FK resolver (F8): `normalizeKey` (trim + collapse ws + casefold, each toggleable), `buildKeyMap` (natural-key → row-id with duplicate detection; returns `{ok:false, duplicates, map}` on collision), `resolveForeignValue` (all-or-nothing; dedupes repeated values by default; empty → `[]` per PRD), `splitMultiValue` helper (`,` `|` `;` `\n`), `HUBDB_MAX_ROWS_PER_TABLE = 10_000` constant. onMissing policies (fail/skip/null/stub) live at the caller — resolver just reports missing
-  - `vitest` — 5.0.1 installed; suites colocated with source (`lib/graph.test.ts`, `lib/schema.test.ts`, `lib/resolve.test.ts`, `lib/hubdb/provision.test.ts`); `pnpm test` / `pnpm test:run`. 64 cases across 4 suites, all green
+  - `lib/hubdb/import.ts` — F8 execution layer. `importRows(ops, {schema, tableIds, source})` runs in topological order (`toposortOrThrow` on the schema graph): per table, fetch existing draft rows → build keyMap on naturalKey (dupe + 10k-cap pre-flight via `ImportPreflightError`) → for each source row, resolve FK columns using previously-populated tables' key maps → split into insert/update by naturalKey lookup → batch update, then batch insert at 100/call. Newly-inserted row ids fold back into the key map so downstream tables resolve correctly. Injectable `ImportOps`; `opsFromClientForImport(client)` builds the real one. `onMissing='fail'` per-row (skip + log, other rows continue); other policies + stale-ID retry + cancel signal noted as follow-ups. Assumes `foreignColumn === target.naturalKey` (the `resolveDefaults` happy path)
+  - `vitest` — 5.0.1 installed; suites colocated with source (`lib/graph.test.ts`, `lib/schema.test.ts`, `lib/resolve.test.ts`, `lib/hubdb/provision.test.ts`, `lib/hubdb/import.test.ts`); `pnpm test` / `pnpm test:run`. 75 cases across 5 suites, all green
 - Git: `main` tracking `origin/main` at https://github.com/junelapera/hubspot-importer
 
 ### In flight — Phase 1 foundations
@@ -41,11 +42,12 @@ Running log of where the HubDB Importer project is, what's in flight, and what's
 | 9 | `lib/hubdb/provision.ts` — compose wrapper + graph into topological provisioner (name-based FK happy path from F0-2) | done — self-loop + 2-cycle break paths tested via fake ops |
 | 10 | Validate PATCH-as-full-replace assumption in `provision.ts` against the sandbox | done — F0-10/11/12; `patchTable` path bug fixed, `getDraftTable` added, end-to-end integration spike passes |
 | 11 | `lib/resolve.ts` — key map builder + FK resolver (F8) | done — 24 cases (normalize + split + build map w/ duplicates + resolve all-or-nothing + dedupe + multi-value) |
-| 12 | `lib/hubdb/import.ts` — F8 execution (pass-1 upsert foreign, pass-2 main w/ resolved FKs, batching, retry) | pending |
-| 13 | Supabase project + `portals` / `mappings` / `jobs` / `job_batches` / `job_errors` / `key_maps` tables | pending |
-| 14 | F1 portal-connection API + encrypted token storage | pending |
-| 15 | Rate-limit stress test (still-open Phase-0 question) | pending |
-| 16 | Long-job runner strategy (still-open Phase-0 question) | pending |
+| 12 | `lib/hubdb/import.ts` — F8 execution (pass-1 upsert foreign, pass-2 main w/ resolved FKs, batching, retry) | done — 11 cases; ImportPreflightError for dupes + 10k cap; RowError for per-row failures |
+| 13 | End-to-end sandbox spike for the importer (`provision → importRows → push-live`) | pending |
+| 14 | Supabase project + `portals` / `mappings` / `jobs` / `job_batches` / `job_errors` / `key_maps` tables | pending |
+| 15 | F1 portal-connection API + encrypted token storage | pending |
+| 16 | Rate-limit stress test (still-open Phase-0 question) | pending |
+| 17 | Long-job runner strategy (still-open Phase-0 question) | pending |
 
 ### Archived — Phase 0 tasks
 | # | Task | Status |
@@ -113,6 +115,13 @@ HubL render (last item in phase-0 checklist) deferred — do manually in HubSpot
 - Design choice: `Delimiter` typed as `"," | "|" | ";" | "\n"` per PRD F5. Union rather than free-string keeps mapping-file validation cheap downstream
 - 24 vitest cases (normalize defaults + opt-outs + coercion + null handling; split per delimiter; buildKeyMap happy/duplicate/empty-value-skip/coercion; resolve single/empty/whitespace/dedupe/multi-value-hit/multi-value-miss/every-distinct-missing + composition with `splitMultiValue`). Suite now 64 across 4 files
 - **Next step:** `lib/hubdb/import.ts` composes wrapper + schema + graph + resolve into the F8 execution: pass-1 upsert foreign tables (batch) + build key maps (with dupe detection + 10k cap check), pass-2 main table with resolved FKs, retry on 429/5xx, cancel at batch boundary. Or pivot to F1 portal-connection API + Supabase scaffolding if we want to bring the app layer up first
+
+- Wrote `lib/hubdb/import.ts` — the F8 execution layer. Topologically iterates schema tables via `toposortOrThrow(nodesFromTableInputs(...))`, and for each: fetches existing draft rows, builds a normalized keyMap on `naturalKey` (aborts with `ImportPreflightError` on dupes or if existing + source would exceed the 10k cap), splits source rows into insert vs update by naturalKey lookup, resolves FK columns via previously-populated tables' key maps, and batch-writes at 100/call (updates then inserts). Newly-inserted row ids fold back into the local key map so downstream tables that FK-reference this one resolve against the fresh ids
+- **Scope-limited choices**: (a) `onMissing='fail'` per-row — the row is skipped and logged as a `RowError`, other rows continue; other policies (skip/null/stub) are follow-ups; (b) assumes `foreignColumn === target.naturalKey` (which `resolveDefaults` guarantees for single-column naturalKeys) — composite naturalKeys are unsupported in v1; (c) no stale-ID re-resolve on write error, no cancel signal (retries handled by wrapper); (d) doesn't call `push-live` — that's F9
+- **Injectable `ImportOps`** (list + batchCreate + batchUpdate) mirrors the provisioner's testability pattern. Tests use a `FakeOps` with an internal Map<ref, HubdbRow[]> store and a call log. 11 vitest cases (all-new insert with cross-table FK resolution, PATCH-update by naturalKey, casefold matching, dupe abort, 10k-cap abort, per-row unresolved-fk skip, missing-naturalKey source, 100-row chunking on a 250-row batch, empty-source no-writes, unmapped-table error path, lifecycle event ordering). Suite now 75 across 5 files
+- **Wrote-time artifact false-positive**: my usual `cat -A | grep '\^@'` check reported 1 match on this file, but `python3 -c "open(p).read().count(b'\\x00')"` returned 0 — the "hit" was `M-^@` inside the UTF-8 sequence for `…`. Retiring the cat-based check in favor of the python one
+- **Ticked off in `phases/phase-1-mvp.md`**: F8's 5 code items + F8's "retry on 429/5xx" (wrapper-level), 5 of 7 items in "Foreign key resolution correctness" (Section 8), and 3 of 4 constraint-enforcement items (Section 10). Remaining F8 items are execution-environment concerns (Supabase persistence, throttle, cancel button, worker separation)
+- **Next step:** end-to-end sandbox spike (`provision → importRows → push-live`) analogous to `11-provision-update.ts`, then either F1 portal-connection API + Supabase scaffolding or start on results/logging (F10) surface
 
 ### 2026-09-14
 - `.env.local` provisioned with `HUBSPOT_TOKEN` — spike unblocked

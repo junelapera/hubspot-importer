@@ -61,3 +61,20 @@ export type {
   ProvisionOptions,
   ProvisionResult,
 } from "./provision";
+
+export {
+  ImportPreflightError,
+  importRows,
+  opsFromClientForImport,
+} from "./import";
+export type {
+  ImportEvent,
+  ImportInput,
+  ImportOps,
+  ImportOptions,
+  ImportResult,
+  RowError,
+  RowErrorKind,
+  SourceRow,
+  TableImportResult,
+} from "./import";
