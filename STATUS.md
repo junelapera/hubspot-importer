@@ -6,11 +6,12 @@ Running log of where the HubDB Importer project is, what's in flight, and what's
 
 **Phase:** 1 — MVP (in progress; core lib layer complete)
 
-**Blocked on:** nothing. Wrapper + graph + schema + provisioner + resolver + importer are all shipped, typechecked, and tested (75 vitest cases, 5 suites). Spike scripts re-pass against the sandbox. PATCH-semantics validated end-to-end and the provisioner smoke-tests against a real sandbox table (`scripts/spike/11-provision-update.ts`).
+**Blocked on:** a Supabase cloud project. User picked "Cloud project" for the Supabase-mode question — needs to create the project at supabase.com, paste `SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY` into `.env.local`, and paste `supabase/migrations/20260915000000_init.sql` into the dashboard SQL Editor. Once done, F1 API routes can be built + smoke-tested. Code side is unblocked in the meantime.
 
 **Next up (unblocked):**
-- End-to-end sandbox integration spike for the importer (analogous to `11-provision-update.ts`) — smoke-test the full `provision → importRows → push-live` chain against real HubDB.
-- F1 portal-connection API + Supabase scaffolding (starts the app-layer work).
+- F1 API routes (`POST /api/portals`, `GET /api/portals`) + typed portal repo (`lib/db/portals.ts`) — API code can be written against an unavailable DB; will fail loudly at runtime until Supabase is configured.
+- Portal picker UI (`app/portals/page.tsx`) with sandbox/prod badge.
+- End-to-end sandbox integration spike for the importer.
 - Rate-limit stress test (still-open Phase-0 question).
 
 ### What exists
@@ -25,7 +26,11 @@ Running log of where the HubDB Importer project is, what's in flight, and what's
   - `lib/hubdb/provision.ts` — topological two-phase provisioner. Takes an injectable `ProvisionOps` adapter (not the raw client) for testability; `opsFromClient(client)` builds the real one. Self-references included in the graph so `breakCycles` catches them. Phase 2 groups deferred edges by source and PATCHes the missing FK columns in per table. **Sends `portal.columns + new columns` on every PATCH** (existing ids preserved) — validated as REQUIRED by F0-11: HubDB PATCH is full-replace; sending only new columns silently destroys the schema
   - `lib/resolve.ts` — low-level FK resolver (F8): `normalizeKey` (trim + collapse ws + casefold, each toggleable), `buildKeyMap` (natural-key → row-id with duplicate detection; returns `{ok:false, duplicates, map}` on collision), `resolveForeignValue` (all-or-nothing; dedupes repeated values by default; empty → `[]` per PRD), `splitMultiValue` helper (`,` `|` `;` `\n`), `HUBDB_MAX_ROWS_PER_TABLE = 10_000` constant. onMissing policies (fail/skip/null/stub) live at the caller — resolver just reports missing
   - `lib/hubdb/import.ts` — F8 execution layer. `importRows(ops, {schema, tableIds, source})` runs in topological order (`toposortOrThrow` on the schema graph): per table, fetch existing draft rows → build keyMap on naturalKey (dupe + 10k-cap pre-flight via `ImportPreflightError`) → for each source row, resolve FK columns using previously-populated tables' key maps → split into insert/update by naturalKey lookup → batch update, then batch insert at 100/call. Newly-inserted row ids fold back into the key map so downstream tables resolve correctly. Injectable `ImportOps`; `opsFromClientForImport(client)` builds the real one. `onMissing='fail'` per-row (skip + log, other rows continue); other policies + stale-ID retry + cancel signal noted as follow-ups. Assumes `foreignColumn === target.naturalKey` (the `resolveDefaults` happy path)
-  - `vitest` — 5.0.1 installed; suites colocated with source (`lib/graph.test.ts`, `lib/schema.test.ts`, `lib/resolve.test.ts`, `lib/hubdb/provision.test.ts`, `lib/hubdb/import.test.ts`); `pnpm test` / `pnpm test:run`. 75 cases across 5 suites, all green
+  - `lib/crypto.ts` — AES-256-GCM `encrypt(plaintext) → base64` / `decrypt(base64) → plaintext`. Single output string encodes `iv || tag || ciphertext`. Reads `PORTAL_TOKEN_ENCRYPTION_KEY` (base64, 32 bytes) from env; throws with a clear message on missing / wrong length. `generateEncryptionKey()` helper for one-shot key generation. 10 vitest cases (roundtrip, unicode, IV freshness, bit-flip rejection via GCM auth tag, truncation, wrong-key rejection, missing-env, wrong-length-key)
+  - `lib/db/supabase.ts` — `createSupabaseServerClient()` factory using `SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY`. Server-only (bypasses RLS); `auth: { persistSession: false, autoRefreshToken: false }` for request-scoped use. Untyped `SupabaseClient` for now — typed repos will layer on top in F1
+  - `supabase/migrations/20260915000000_init.sql` — full DDL for the 6 Phase-1 tables (`portals`, `mappings`, `jobs`, `job_batches`, `job_errors`, `key_maps`) plus a shared `set_updated_at()` trigger and `pgcrypto`. Paste into the Supabase dashboard SQL Editor to apply (no local CLI in v1; filename follows the CLI's timestamp convention for later adoption)
+  - `.env.example` — refreshed with the new SUPABASE_* and PORTAL_TOKEN_ENCRYPTION_KEY blocks; the old HUBSPOT_* vars are now scoped as "spike scripts only" (once F1 lands, portals live in Supabase)
+  - `vitest` — 5.0.1 installed; suites colocated with source (`lib/graph.test.ts`, `lib/schema.test.ts`, `lib/resolve.test.ts`, `lib/crypto.test.ts`, `lib/hubdb/provision.test.ts`, `lib/hubdb/import.test.ts`); `pnpm test` / `pnpm test:run`. 85 cases across 6 suites, all green
 - Git: `main` tracking `origin/main` at https://github.com/junelapera/hubspot-importer
 
 ### In flight — Phase 1 foundations
@@ -44,10 +49,12 @@ Running log of where the HubDB Importer project is, what's in flight, and what's
 | 11 | `lib/resolve.ts` — key map builder + FK resolver (F8) | done — 24 cases (normalize + split + build map w/ duplicates + resolve all-or-nothing + dedupe + multi-value) |
 | 12 | `lib/hubdb/import.ts` — F8 execution (pass-1 upsert foreign, pass-2 main w/ resolved FKs, batching, retry) | done — 11 cases; ImportPreflightError for dupes + 10k cap; RowError for per-row failures |
 | 13 | End-to-end sandbox spike for the importer (`provision → importRows → push-live`) | pending |
-| 14 | Supabase project + `portals` / `mappings` / `jobs` / `job_batches` / `job_errors` / `key_maps` tables | pending |
-| 15 | F1 portal-connection API + encrypted token storage | pending |
-| 16 | Rate-limit stress test (still-open Phase-0 question) | pending |
-| 17 | Long-job runner strategy (still-open Phase-0 question) | pending |
+| 14 | Supabase project + 6 phase-1 tables — SQL migration written; user needs to create cloud project + apply | code done; awaiting cloud project + env vars |
+| 15 | `lib/crypto.ts` — AES-256-GCM encryption for portal tokens | done — 10 cases |
+| 16 | `lib/db/supabase.ts` — server-side client factory | done |
+| 17 | F1 portal-connection API + typed portal repo + picker UI | pending |
+| 18 | Rate-limit stress test (still-open Phase-0 question) | pending |
+| 19 | Long-job runner strategy (still-open Phase-0 question) | pending |
 
 ### Archived — Phase 0 tasks
 | # | Task | Status |
@@ -122,6 +129,15 @@ HubL render (last item in phase-0 checklist) deferred — do manually in HubSpot
 - **Wrote-time artifact false-positive**: my usual `cat -A | grep '\^@'` check reported 1 match on this file, but `python3 -c "open(p).read().count(b'\\x00')"` returned 0 — the "hit" was `M-^@` inside the UTF-8 sequence for `…`. Retiring the cat-based check in favor of the python one
 - **Ticked off in `phases/phase-1-mvp.md`**: F8's 5 code items + F8's "retry on 429/5xx" (wrapper-level), 5 of 7 items in "Foreign key resolution correctness" (Section 8), and 3 of 4 constraint-enforcement items (Section 10). Remaining F8 items are execution-environment concerns (Supabase persistence, throttle, cancel button, worker separation)
 - **Next step:** end-to-end sandbox spike (`provision → importRows → push-live`) analogous to `11-provision-update.ts`, then either F1 portal-connection API + Supabase scaffolding or start on results/logging (F10) surface
+
+- **Pivoted to phase-1-mvp order.** User asked "we still don't have UI?" and then "let's proceed to what has planned on phase 01" — so I switched from further lib work to the phase-1 checklist starting at "Project scaffolding" → F1. Picked "Cloud project" for the Supabase-mode question via AskUserQuestion
+- Wrote `supabase/migrations/20260915000000_init.sql` — full DDL for `portals`, `mappings`, `jobs`, `job_batches`, `job_errors`, `key_maps`. Enables `pgcrypto` for `gen_random_uuid()`. Shared `set_updated_at()` trigger on `portals` + `mappings`. Job-side tables carry the cursor state (`job_batches`) and per-row failure log (`job_errors`) that F8/F10 will need. `key_maps.entries` is a JSONB `{normKey: rowId}` snapshot per (job, table) for resume without re-fetching. Filename follows the Supabase CLI's timestamp convention so we can `supabase link` this later without renaming
+- Wrote `lib/crypto.ts` — AES-256-GCM. `encrypt(plaintext) → base64` returning a single string that packs `iv || tag || ciphertext`. Key read from `PORTAL_TOKEN_ENCRYPTION_KEY` (32 bytes, base64) with a clear error if missing or wrong length. `generateEncryptionKey()` helper. 10 tests (roundtrip, unicode, IV freshness, bit-flip → auth tag catches, truncation, wrong-key rejection, missing env, wrong length)
+- Installed `@supabase/supabase-js` (2.116.0). Wrote `lib/db/supabase.ts` — server-only factory using the service-role key, `persistSession: false`, `autoRefreshToken: false`. Untyped `SupabaseClient` for now; typed repos will layer on top when F1 lands
+- Rewrote `.env.example` — SUPABASE_* + PORTAL_TOKEN_ENCRYPTION_KEY blocks with generation instructions; the old HUBSPOT_* vars are re-scoped as "spike scripts only" since app code will read tokens from the `portals` table once F1 is wired
+- **Blocked on user action for full validation:** creating the Supabase cloud project + applying the SQL migration + pasting env vars. Code side is unblocked — F1 API routes can be written and typechecked against this scaffolding; they'll fail with a clear message at runtime if Supabase isn't configured
+- 85 cases across 6 suites still green. tsc clean
+- **Next step:** F1 API routes (`POST /api/portals`, `GET /api/portals`) + `lib/db/portals.ts` typed repo + portal picker page
 
 ### 2026-09-14
 - `.env.local` provisioned with `HUBSPOT_TOKEN` — spike unblocked

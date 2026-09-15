@@ -3,11 +3,11 @@
 **Goal:** Ship a usable importer for CSV + JSON sources with schema provisioning, foreign-key resolution, dry run, upsert, and publish.
 
 ## Project scaffolding
-- [ ] Initialize Next.js 15 (App Router, TypeScript) project
-- [ ] Set up Supabase project + connection
-- [ ] Create DB tables: `portals`, `mappings`, `jobs`, `job_batches`, `job_errors`, `key_maps`
+- [x] Initialize Next.js 15 (App Router, TypeScript) project (shipped as Next.js 16)
+- [x] Set up Supabase project + connection (`@supabase/supabase-js` installed; `lib/db/supabase.ts` factory; SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY env expected — cloud project creation is user-side)
+- [x] Create DB tables: `portals`, `mappings`, `jobs`, `job_batches`, `job_errors`, `key_maps` (SQL in `supabase/migrations/20260915000000_init.sql`; paste into dashboard SQL Editor to apply)
 - [ ] Configure Vercel deployment target
-- [ ] Set up encryption utility for token storage (server-side only)
+- [x] Set up encryption utility for token storage (server-side only) — `lib/crypto.ts` AES-256-GCM, 10 vitest cases
 
 ## F1 — Portal connection
 - [ ] `POST /api/portals` — create portal (label, env, token)
