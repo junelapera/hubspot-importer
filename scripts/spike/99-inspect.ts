@@ -1,18 +1,16 @@
-import { hubdb, log, runSpike } from "./client";
-
-type Row = { id: string; values: Record<string, unknown>; publishedAt: string | null };
-type RowList = { results: Row[]; paging?: { next?: { after: string } } };
-type Table = { id: string; name: string; published: boolean; publishedAt?: string | null };
+import { client, log, runSpike } from "./client";
+import { getTable, listDraftRowsPage, listLiveRowsPage } from "../../lib/hubdb";
 
 async function countRows(tableName: string, view: "draft" | "live") {
-  const path = view === "draft" ? `/tables/${tableName}/rows/draft` : `/tables/${tableName}/rows`;
+  const load = view === "draft" ? listDraftRowsPage : listLiveRowsPage;
   try {
-    const res = await hubdb<RowList>(path, { query: { limit: 1000 } });
+    const page = await load(client, tableName, { limit: 1000 });
+    const first = page.results[0];
     return {
       view,
-      count: res.results?.length ?? 0,
-      firstId: res.results?.[0]?.id,
-      firstSlug: res.results?.[0]?.values?.slug ?? res.results?.[0]?.values?.sku,
+      count: page.results.length,
+      firstId: first?.id,
+      firstSlug: first?.values?.slug ?? first?.values?.sku,
     };
   } catch (err) {
     return { view, error: (err as Error).message };
@@ -20,7 +18,7 @@ async function countRows(tableName: string, view: "draft" | "live") {
 }
 
 async function inspect(tableName: string) {
-  const table = await hubdb<Table>(`/tables/${tableName}`);
+  const table = await getTable(client, tableName);
   const [draft, live] = await Promise.all([countRows(tableName, "draft"), countRows(tableName, "live")]);
   return { table: tableName, id: table.id, published: table.published, publishedAt: table.publishedAt, draft, live };
 }

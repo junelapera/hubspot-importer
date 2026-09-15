@@ -1,22 +1,16 @@
-import { hubdb, HubdbError, log, runSpike } from "./client";
-
-type Column = {
-  id?: string;
-  name: string;
-  label?: string;
-  type: string;
-  foreignTableId?: string;
-  foreignColumnId?: string;
-  foreignTableName?: string;
-  foreignColumnName?: string;
-};
-type Table = { id: string; name: string; label: string; published: boolean; columns?: Column[] };
-type ListTables = { results: Table[] };
+import { client, HubdbError, log, runSpike } from "./client";
+import {
+  createTable,
+  getTable,
+  listTables,
+  type HubdbColumnInput,
+  type HubdbTable,
+} from "../../lib/hubdb";
 
 const MAIN_NAME = "products";
 const MAIN_LABEL = "Products";
 
-function nameBasedColumns(): Column[] {
+function nameBasedColumns(): HubdbColumnInput[] {
   return [
     { name: "sku", label: "SKU", type: "TEXT" },
     { name: "title", label: "Title", type: "TEXT" },
@@ -25,9 +19,9 @@ function nameBasedColumns(): Column[] {
   ];
 }
 
-function idBasedColumns(brands: Table, categories: Table): Column[] {
-  const brandNameCol = brands.columns?.find((c) => c.name === "name");
-  const categoryNameCol = categories.columns?.find((c) => c.name === "name");
+function idBasedColumns(brands: HubdbTable, categories: HubdbTable): HubdbColumnInput[] {
+  const brandNameCol = brands.columns.find((c) => c.name === "name");
+  const categoryNameCol = categories.columns.find((c) => c.name === "name");
   if (!brandNameCol?.id || !categoryNameCol?.id) {
     throw new Error("brands or categories missing 'name' column id — cannot build id-based FK columns");
   }
@@ -39,21 +33,7 @@ function idBasedColumns(brands: Table, categories: Table): Column[] {
   ];
 }
 
-async function createProducts(columns: Column[]) {
-  return hubdb<Table>("/tables", {
-    method: "POST",
-    body: {
-      name: MAIN_NAME,
-      label: MAIN_LABEL,
-      useForPages: false,
-      allowChildTables: false,
-      enableChildTablePages: false,
-      columns,
-    },
-  });
-}
-
-async function tryAttempt(label: string, attempt: () => Promise<Table>) {
+async function tryAttempt(label: string, attempt: () => Promise<HubdbTable>) {
   try {
     const res = await attempt();
     return {
@@ -61,14 +41,12 @@ async function tryAttempt(label: string, attempt: () => Promise<Table>) {
       ok: true as const,
       id: res.id,
       published: res.published,
-      columns: res.columns?.map((c) => ({
+      columns: res.columns.map((c) => ({
         id: c.id,
         name: c.name,
         type: c.type,
         foreignTableId: c.foreignTableId,
         foreignColumnId: c.foreignColumnId,
-        foreignTableName: c.foreignTableName,
-        foreignColumnName: c.foreignColumnName,
       })),
     };
   } catch (err) {
@@ -80,49 +58,63 @@ async function tryAttempt(label: string, attempt: () => Promise<Table>) {
 }
 
 runSpike(async () => {
-  const list = await hubdb<ListTables>("/tables");
-  const brands = list.results.find((t) => t.name === "brands");
-  const categories = list.results.find((t) => t.name === "categories");
+  const list = await listTables(client);
+  const brands = list.find((t) => t.name === "brands");
+  const categories = list.find((t) => t.name === "categories");
   if (!brands || !categories) {
     throw new Error("brands and/or categories missing — run 01-provision-foreign.ts first");
   }
 
-  const existing = list.results.find((t) => t.name === MAIN_NAME);
+  const existing = list.find((t) => t.name === MAIN_NAME);
   if (existing) {
-    const detail = await hubdb<Table>(`/tables/${existing.id}`);
+    const detail = await getTable(client, existing.id);
     log("products already exists — skipping create", {
       id: existing.id,
       published: existing.published,
-      columns: detail.columns?.map((c) => ({
+      columns: detail.columns.map((c) => ({
         id: c.id,
         name: c.name,
         type: c.type,
         foreignTableId: c.foreignTableId,
         foreignColumnId: c.foreignColumnId,
-        foreignTableName: c.foreignTableName,
-        foreignColumnName: c.foreignColumnName,
       })),
     });
     return;
   }
 
-  const brandsDetail = await hubdb<Table>(`/tables/${brands.id}`);
-  const categoriesDetail = await hubdb<Table>(`/tables/${categories.id}`);
+  const brandsDetail = await getTable(client, brands.id);
+  const categoriesDetail = await getTable(client, categories.id);
   log("foreign table columns", {
-    brands: brandsDetail.columns?.map((c) => ({ id: c.id, name: c.name, type: c.type })),
-    categories: categoriesDetail.columns?.map((c) => ({ id: c.id, name: c.name, type: c.type })),
+    brands: brandsDetail.columns.map((c) => ({ id: c.id, name: c.name, type: c.type })),
+    categories: categoriesDetail.columns.map((c) => ({ id: c.id, name: c.name, type: c.type })),
   });
 
   const nameAttempt = await tryAttempt(
     "names (foreignTableName + foreignColumnName)",
-    () => createProducts(nameBasedColumns())
+    () =>
+      createTable(client, {
+        name: MAIN_NAME,
+        label: MAIN_LABEL,
+        useForPages: false,
+        allowChildTables: false,
+        enableChildTablePages: false,
+        columns: nameBasedColumns(),
+      }),
   );
   log("attempt: name-based FK", nameAttempt);
   if (nameAttempt.ok) return;
 
   const idAttempt = await tryAttempt(
     "ids (foreignTableId + foreignColumnId)",
-    () => createProducts(idBasedColumns(brandsDetail, categoriesDetail))
+    () =>
+      createTable(client, {
+        name: MAIN_NAME,
+        label: MAIN_LABEL,
+        useForPages: false,
+        allowChildTables: false,
+        enableChildTablePages: false,
+        columns: idBasedColumns(brandsDetail, categoriesDetail),
+      }),
   );
   log("attempt: id-based FK", idAttempt);
 });

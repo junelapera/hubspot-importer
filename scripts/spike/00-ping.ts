@@ -1,14 +1,10 @@
-import { hubdb, HubdbError, log, runSpike, type ApiBase } from "./client";
+import { client, HubdbError, log, runSpike } from "./client";
+import type { HubdbApiBase, HubdbPage, HubdbTable } from "../../lib/hubdb";
 
-type TablesResponse = {
-  results: Array<{ id: string; name: string; label: string; published: boolean }>;
-  total?: number;
-};
-
-async function ping(base: ApiBase) {
+async function ping(base: HubdbApiBase) {
   const started = performance.now();
   try {
-    const res = await hubdb<TablesResponse>("/tables", { base });
+    const res = await client.request<HubdbPage<HubdbTable>>("/tables", { base });
     const ms = Math.round(performance.now() - started);
     return {
       base,

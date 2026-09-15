@@ -2,22 +2,43 @@
 
 Running log of where the HubDB Importer project is, what's in flight, and what's next. Update as we go.
 
-## Current state — 2026-09-14
+## Current state — 2026-09-15
 
-**Phase:** 0 — Spike (complete, pending manual HubL render check)
+**Phase:** 1 — MVP (in progress; foundations landed)
 
-**Blocked on:** nothing. All Phase-0 code tasks done. HubL page render is a manual editor step per the Phase-0 plan and does not gate Phase 1.
+**Blocked on:** nothing. `lib/hubdb/` wrapper and `lib/graph.ts` toposort are shipped, typechecked, and hand-verified. Spike scripts are migrated onto the new wrapper and re-passed the sandbox smoke test.
 
-**Ready for Phase 1** — wrap the proven API chain into `lib/hubdb/`, `lib/graph.ts`, and the schema/mapping layer. See `phases/phase-1.md`.
+**Next up (unblocked):** pick one of `lib/schema.ts` (parse/validate/diff), a `lib/hubdb/provision.ts` that composes the wrapper + graph into a topologically ordered provisioner, or the Supabase/portal/API-route scaffolding (F1 in `phases/phase-1-mvp.md`).
 
 ### What exists
 - Next.js 16 App Router scaffold (TypeScript, Tailwind v4, ESLint 9, pnpm)
 - shadcn/ui initialized (base-nova / Base UI) — `Button` under `components/ui/`
 - PRD (`hubdb-importer-prd.md`) and phase plans (`phases/phase-0…phase-3.md`)
-- Phase-0 spike harness — `scripts/spike/client.ts` + `00-ping.ts`, runs via `pnpm spike <path>` with `.env.local` loading
+- Phase-0 spike harness — `scripts/spike/*.ts`, runs via `pnpm spike <path>` with `.env.local` loading; all migrated onto `lib/hubdb/`
+- Phase-1 foundations:
+  - `lib/hubdb/` — typed HubDB wrapper: `createHubdbClient()` factory with 429/5xx retry + `Retry-After` handling; id normalization (all ids returned as strings); typed operations for tables (`list/get/create/patch/pushLive`) and rows (`listAll{Draft,Live}Rows`, `batch{Create,Update,Purge}DraftRows`); `/rows/draft/batch/*` path shape hard-enforced (F0-5), 100-row cap asserted (F0-6)
+  - `lib/graph.ts` — directed dependency graph shared by provisioner/importer/publisher: `toposort()`, `toposortOrThrow()` (F6 "reject with clear message"), `breakCycles()` (F6 "offer two-phase write") with deferred-edge output for column-less create + PATCH-in strategy; converters from `HubdbTableInput` and `HubdbTable`; iterative Tarjan's SCC for cycle detection
+  - `scripts/graph-check.ts` — 25-assertion smoke script covering linear DAGs, self-loop, 2/3-node cycles, disjoint components, and both converters. Not tests-proper — see caveat below
 - Git: `main` tracking `origin/main` at https://github.com/junelapera/hubspot-importer
 
-### In flight — Phase 0 tasks
+### In flight — Phase 1 foundations
+| # | Task | Status |
+|---|---|---|
+| 1 | `lib/hubdb/client.ts` — factory, retry/backoff, `HubdbError` with rate-limit surface | done |
+| 2 | `lib/hubdb/types.ts` — normalized shapes (string ids), `isPublished()` treating epoch as unpublished (F0-9) | done |
+| 3 | `lib/hubdb/tables.ts` — list/get/create/patch/pushLive | done |
+| 4 | `lib/hubdb/rows.ts` — draft/live pagination + `batch/{create,update,purge}` under `/rows/draft/` (F0-5), 100-row cap asserted | done |
+| 5 | Migrate spike scripts onto `lib/hubdb/` (regression check) | done — 00-ping re-passes against sandbox |
+| 6 | `lib/graph.ts` — toposort + cycle detection + two-phase decomposition | done — 25 hand-verified assertions |
+| 7 | Test runner (Vitest leaning default) — decide + install | pending |
+| 8 | `lib/schema.ts` — parse + validate schema file, diff vs portal | pending |
+| 9 | `lib/hubdb/provision.ts` — compose wrapper + graph into topological provisioner (name-based FK happy path from F0-2) | pending |
+| 10 | Supabase project + `portals` / `mappings` / `jobs` / `job_batches` / `job_errors` / `key_maps` tables | pending |
+| 11 | F1 portal-connection API + encrypted token storage | pending |
+| 12 | Rate-limit stress test (still-open Phase-0 question) | pending |
+| 13 | Long-job runner strategy (still-open Phase-0 question) | pending |
+
+### Archived — Phase 0 tasks
 | # | Task | Status |
 |---|---|---|
 | 1 | Scaffold spike harness (env, tsx, client) | done |
@@ -51,6 +72,19 @@ HubL render (last item in phase-0 checklist) deferred — do manually in HubSpot
 ---
 
 ## Log
+
+### 2026-09-15
+- Kicked off Phase 1. Started with the item STATUS+CLAUDE.md called out first: `lib/hubdb/` typed wrapper hardening
+- Wrote `lib/hubdb/client.ts` — `createHubdbClient({ token, ... })` factory (per-portal, no global env read). Retries 429 + 5xx with `Retry-After` honored, else exponential backoff with jitter capped at 30s (default 5 attempts). `HubdbError` exposes status, parsed rate-limit headers, and attempt count
+- Wrote `lib/hubdb/types.ts` — normalized shapes. Table `id`, row `id`, `foreignTableId`, `foreignColumnId` are all `string` (F0-4 wrapper contract). Added `isPublished()` that treats the `1970-01-01T00:00:00Z` epoch as "never published" (F0-9)
+- Wrote `lib/hubdb/tables.ts` (`listTables/getTable/createTable/patchTable/pushLive`) and `lib/hubdb/rows.ts` (`listAllDraftRows/listAllLiveRows`, `batch{Create,Update,Purge}DraftRows`). Batch mutation paths are hard-coded to `/rows/draft/batch/{create,update,purge}` (F0-5). 100-row cap asserted before the call (F0-6)
+- Migrated all 7 spike scripts onto the new wrapper. `scripts/spike/client.ts` shrank to ~30-line shim that builds one `HubdbClient` from `HUBSPOT_TOKEN` and re-exports `log`/`runSpike`/`HubdbError`. Spikes now act as regression checks of the wrapper — any break in id normalization, retry, or batch paths surfaces when re-running them
+- Smoke-tested `pnpm spike scripts/spike/00-ping.ts` against the sandbox. Green: both `v3` and `dated` bases return 4 tables (~800ms each), all ids as strings
+- Wrote `lib/graph.ts` — the topological sort shared by provisioner + importer + publisher. Kahn's for order, iterative Tarjan's for SCC / cycle detection. Three public entry points: `toposort()` (partial order + cycles report), `toposortOrThrow()` (F6 "reject with clear message"), `breakCycles()` (F6 "offer two-phase write"). Converters: `nodesFromTableInputs` (name-based FK, the F0-2 happy path) and `nodesFromHubdbTables` (id-based). Convention: `GraphNode.dependencies` = prereqs; `GraphEdge {from, to}` mirrors that ("from depends on to")
+- Wrote `scripts/graph-check.ts` — 25 hand-verified assertions across linear DAG, spike scenario, self-loop, 2/3-node cycles with dangling dependents, `toposortOrThrow` cycle payload, `breakCycles` deferred-edge output, disjoint tie-break stability, both converters, and duplicate-name rejection. Two bugs shaken out during the check: (a) edge direction inverted (adj stored `n→dep` but Kahn's needed `prereq→dependent`); (b) `toposort` emitted cycle nodes when they had no non-cycle prereqs — semantic decision to filter them out and force callers to `breakCycles` if they want an order that covers cycle nodes
+- **Caveat — not a test runner.** `scripts/graph-check.ts` is a one-shot assertion runner, not Vitest. No CI, no watch mode, no `describe/it`. Fine for shaking bugs out at write-time; needs to be replaced by a proper test runner before the module has real callers. Phase 1 task #7 tracks this
+- **Wrote-time artifact worth watching.** First Write of `lib/graph.ts` landed with `U+0000` (null bytes) in two template literals where the source had spaces (`` `${e.from} ${e.to}` `` → `` `${e.from}\0${e.to}` ``). Detected via `cat -A` when an Edit failed to match. Recovered by rewriting the file. Unclear whether the corruption was in the Write tool, the terminal bridge, or my own emission. If it recurs, may need to encode gaps as ` `
+- **Next step:** pick from the pending list — Vitest install, `lib/schema.ts`, `lib/hubdb/provision.ts` (compose wrapper + graph), or start the Supabase/API-route scaffolding
 
 ### 2026-09-14
 - `.env.local` provisioned with `HUBSPOT_TOKEN` — spike unblocked

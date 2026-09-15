@@ -1,18 +1,13 @@
-import { hubdb, HubdbError, log, runSpike } from "./client";
+import { client, HubdbError, log, runSpike } from "./client";
+import { createTable, listTables, type HubdbTable, type HubdbTableInput } from "../../lib/hubdb";
 
-type Table = { id: string; name: string; label: string; published: boolean };
-type ListTables = { results: Table[] };
-
-type TableSpec = {
-  name: string;
-  label: string;
-  columns: Array<{ name: string; label: string; type: string }>;
-};
-
-const FOREIGN_TABLES: TableSpec[] = [
+const FOREIGN_TABLES: HubdbTableInput[] = [
   {
     name: "brands",
     label: "Brands",
+    useForPages: false,
+    allowChildTables: false,
+    enableChildTablePages: false,
     columns: [
       { name: "name", label: "Name", type: "TEXT" },
       { name: "slug", label: "Slug", type: "TEXT" },
@@ -21,6 +16,9 @@ const FOREIGN_TABLES: TableSpec[] = [
   {
     name: "categories",
     label: "Categories",
+    useForPages: false,
+    allowChildTables: false,
+    enableChildTablePages: false,
     columns: [
       { name: "name", label: "Name", type: "TEXT" },
       { name: "slug", label: "Slug", type: "TEXT" },
@@ -28,26 +26,16 @@ const FOREIGN_TABLES: TableSpec[] = [
   },
 ];
 
-async function ensureTable(spec: TableSpec, existing: Table[]) {
+async function ensureTable(spec: HubdbTableInput, existing: HubdbTable[]) {
   const already = existing.find((t) => t.name === spec.name);
   if (already) {
     return { action: "skip" as const, id: already.id, name: spec.name, published: already.published };
   }
-  const created = await hubdb<Table>("/tables", {
-    method: "POST",
-    body: {
-      name: spec.name,
-      label: spec.label,
-      useForPages: false,
-      allowChildTables: false,
-      enableChildTablePages: false,
-      columns: spec.columns,
-    },
-  });
+  const created = await createTable(client, spec);
   return { action: "create" as const, id: created.id, name: spec.name, published: created.published };
 }
 
-async function reproduceBadForeignColumn(existing: Table[]) {
+async function reproduceBadForeignColumn(existing: HubdbTable[]) {
   const badName = "spike_bad_fk";
   const existingBad = existing.find((t) => t.name === badName);
   if (existingBad) {
@@ -57,16 +45,13 @@ async function reproduceBadForeignColumn(existing: Table[]) {
     };
   }
   try {
-    const res = await hubdb<Table>("/tables", {
-      method: "POST",
-      body: {
-        name: badName,
-        label: "Spike bad FK",
-        useForPages: false,
-        allowChildTables: false,
-        enableChildTablePages: false,
-        columns: [{ name: "brand", label: "Brand", type: "FOREIGN_ID" }],
-      },
+    const res = await createTable(client, {
+      name: badName,
+      label: "Spike bad FK",
+      useForPages: false,
+      allowChildTables: false,
+      enableChildTablePages: false,
+      columns: [{ name: "brand", label: "Brand", type: "FOREIGN_ID" }],
     });
     return {
       reproduced: false,
@@ -82,18 +67,18 @@ async function reproduceBadForeignColumn(existing: Table[]) {
 }
 
 runSpike(async () => {
-  const list = await hubdb<ListTables>("/tables");
+  const existing = await listTables(client);
   log("existing tables", {
-    count: list.results?.length ?? 0,
-    names: list.results?.map((t) => t.name),
+    count: existing.length,
+    names: existing.map((t) => t.name),
   });
 
   const provisioned = [] as Array<Awaited<ReturnType<typeof ensureTable>>>;
   for (const spec of FOREIGN_TABLES) {
-    provisioned.push(await ensureTable(spec, list.results));
+    provisioned.push(await ensureTable(spec, existing));
   }
   log("foreign tables", provisioned);
 
-  const badFk = await reproduceBadForeignColumn(list.results);
+  const badFk = await reproduceBadForeignColumn(existing);
   log("bad FOREIGN_ID column attempt", badFk);
 });

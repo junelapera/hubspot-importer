@@ -1,11 +1,13 @@
-import { hubdb, log, runSpike } from "./client";
-
-type Row = { id: string; values: Record<string, unknown> };
-type BatchResponse = { results: Row[] };
-type RowList = { results: Row[]; paging?: { next?: { after: string } } };
+import { client, log, runSpike } from "./client";
+import {
+  batchCreateDraftRows,
+  HUBDB_MAX_BATCH_SIZE,
+  listAllDraftRows,
+  type HubdbForeignRef,
+  type HubdbRow,
+} from "../../lib/hubdb";
 
 const COUNT = 200;
-const BATCH_SIZE = 100;
 
 function chunk<T>(arr: T[], size: number): T[][] {
   const out: T[][] = [];
@@ -13,33 +15,20 @@ function chunk<T>(arr: T[], size: number): T[][] {
   return out;
 }
 
-async function fetchDraftRows(tableName: string): Promise<Row[]> {
-  const rows: Row[] = [];
-  let after: string | undefined;
-  do {
-    const res = await hubdb<RowList>(`/tables/${tableName}/rows/draft`, {
-      query: { limit: 1000, after },
-    });
-    rows.push(...res.results);
-    after = res.paging?.next?.after;
-  } while (after);
-  return rows;
-}
-
-function buildSlugMap(rows: Row[]): Record<string, string> {
+function buildSlugMap(rows: HubdbRow[]): Record<string, string> {
   return Object.fromEntries(rows.map((r) => [String(r.values.slug ?? ""), r.id]));
 }
 
 type ProductValues = {
   sku: string;
   title: string;
-  brand: Array<{ id: string; type: "foreignid" }>;
-  category: Array<{ id: string; type: "foreignid" }>;
+  brand: HubdbForeignRef[];
+  category: HubdbForeignRef[];
 };
 
 function generateProducts(
   brandMap: Record<string, string>,
-  categoryMap: Record<string, string>
+  categoryMap: Record<string, string>,
 ): ProductValues[] {
   return Array.from({ length: COUNT }, (_, i) => {
     const n = String(i + 1).padStart(3, "0");
@@ -58,31 +47,27 @@ function generateProducts(
 }
 
 async function batchInsert(tableName: string, rows: ProductValues[]) {
-  const batches = chunk(rows, BATCH_SIZE);
+  const batches = chunk(rows, HUBDB_MAX_BATCH_SIZE);
   const timings: Array<{ batch: number; sent: number; returned: number; ms: number }> = [];
-  const created: Row[] = [];
+  const created: HubdbRow[] = [];
   for (let i = 0; i < batches.length; i++) {
     const started = performance.now();
-    const res = await hubdb<BatchResponse>(`/tables/${tableName}/rows/draft/batch/create`, {
-      method: "POST",
-      body: { inputs: batches[i].map((v) => ({ values: v })) },
-    });
+    const inserted = await batchCreateDraftRows(
+      client,
+      tableName,
+      batches[i].map((v) => ({ values: v })),
+    );
     const ms = Math.round(performance.now() - started);
-    timings.push({
-      batch: i + 1,
-      sent: batches[i].length,
-      returned: res.results?.length ?? 0,
-      ms,
-    });
-    created.push(...(res.results ?? []));
+    timings.push({ batch: i + 1, sent: batches[i].length, returned: inserted.length, ms });
+    created.push(...inserted);
   }
   return { created, timings };
 }
 
 runSpike(async () => {
   const [brandsRows, categoriesRows] = await Promise.all([
-    fetchDraftRows("brands"),
-    fetchDraftRows("categories"),
+    listAllDraftRows(client, "brands"),
+    listAllDraftRows(client, "categories"),
   ]);
   const brandMap = buildSlugMap(brandsRows);
   const categoryMap = buildSlugMap(categoriesRows);
@@ -95,7 +80,7 @@ runSpike(async () => {
     throw new Error("brands and/or categories have no rows — run 03-insert-foreign.ts first");
   }
 
-  const existing = await fetchDraftRows("products");
+  const existing = await listAllDraftRows(client, "products");
   if (existing.length > 0) {
     log("products already populated — skipping insert", {
       count: existing.length,

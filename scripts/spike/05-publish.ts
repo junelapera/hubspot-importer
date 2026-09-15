@@ -1,13 +1,12 @@
-import { hubdb, HubdbError, log, runSpike } from "./client";
-
-type Table = { id: string; name: string; published: boolean; publishedAt?: string | null };
+import { client, HubdbError, log, runSpike } from "./client";
+import { pushLive } from "../../lib/hubdb";
 
 const ORDER = ["brands", "categories", "products"] as const;
 
 async function publish(tableName: string) {
   const started = performance.now();
   try {
-    const res = await hubdb<Table>(`/tables/${tableName}/draft/push-live`, { method: "POST" });
+    const res = await pushLive(client, tableName);
     const ms = Math.round(performance.now() - started);
     return {
       table: tableName,
