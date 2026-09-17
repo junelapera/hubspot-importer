@@ -27,9 +27,10 @@ export default function Home() {
           ready
         />
         <SectionLink
-          href="#"
-          title="Mappings"
-          desc="Author + review schema and import mapping definitions (F2–F5)."
+          href="/import"
+          title="Import source"
+          desc="Upload CSV or JSON, preview + validate before mapping (F2)."
+          ready
         />
         <SectionLink
           href="#"

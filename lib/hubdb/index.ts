@@ -65,6 +65,9 @@ export type {
 export { validateHubdbToken } from "./introspection";
 export type { IntrospectionResult, IntrospectionOptions } from "./introspection";
 
+export { fetchPortalSchema } from "./portal-schema";
+export type { PortalSchemaSnapshot, PortalSchemaTable } from "./portal-schema";
+
 export {
   ImportPreflightError,
   importRows,

@@ -18,53 +18,53 @@
 - [ ] UI: portal picker with sandbox/prod badge (red for prod)
 
 ## F2 — Source ingestion
-- [ ] CSV upload endpoint with delimiter/encoding/header detection
-- [ ] Manual override UI for delimiter, encoding, header row
-- [ ] JSON upload — accept `{ "tableId": [...] }` and `[{ "table": "...", "rows": [...] }]`
-- [ ] Reject nested objects with pointer to offending JSON path
-- [ ] Preview first 20 rows per table in UI
-- [ ] Validation warnings: duplicate natural keys, empty required cols, row count > 10k, text > 10k / rich text > 65k chars
+- [x] CSV upload endpoint with delimiter/encoding/header detection (`POST /api/sources/csv`; BOM sniff + papaparse auto-delimiter)
+- [x] Manual override UI for delimiter, encoding, header row (form controls on `/import`)
+- [x] JSON upload — accept `{ "tableId": [...] }` and `[{ "table": "...", "rows": [...] }]` (`POST /api/sources/json`)
+- [x] Reject nested objects with pointer to offending JSON path (400 with `path: "table[row].col"`)
+- [x] Preview first 20 rows per table in UI (`SOURCE_PREVIEW_ROWS` constant; grid rendered in `source-uploader.tsx`)
+- [x] Validation warnings: duplicate natural keys, empty required cols, row count > 10k, text > 10k / rich text > 65k chars (`lib/source/validate.ts`; natural-key + required-col checks are generic and stay quiet until F4 supplies them)
 
 ## F3 — Introspection & provisioning
-- [ ] `lib/hubdb/client.ts` — typed HubDB wrapper with batching + backoff
-- [ ] Fetch draft schemas including `columns[].type`, `foreignTableId`, `foreignColumnId`
-- [ ] Per-session schema cache with manual refresh
-- [ ] Display published/draft state + row count per table
-- [ ] `lib/schema.ts` — parse + validate schema definition file
-- [ ] Diff schema vs portal; render plan (create / add / match / conflict)
-- [ ] Create only missing tables and columns; never drop or retype
-- [ ] Topologically ordered provisioning (foreign tables first)
-- [ ] Resolve `foreignTable` → `foreignTableId` and `foreignDisplayColumn` → `foreignColumnId`
-- [ ] Default `foreignDisplayColumn` to target's natural key column when absent
-- [ ] Cycle handling: create tables without FK cols, PATCH cols in after
+- [x] `lib/hubdb/client.ts` — typed HubDB wrapper with batching + backoff
+- [x] Fetch draft schemas including `columns[].type`, `foreignTableId`, `foreignColumnId` (`lib/hubdb/portal-schema.ts::fetchPortalSchema` — list + `getDraftTable` per table)
+- [x] Per-session schema cache with manual refresh (Refresh button on `/portals/[id]/schema` calls `router.refresh()`; page is `dynamic = "force-dynamic"` so no stale cache — trades a re-fetch per view for correctness)
+- [x] Display published/draft state + row count per table (badges + row count in `/portals/[id]/schema`)
+- [x] `lib/schema.ts` — parse + validate schema definition file
+- [x] Diff schema vs portal; render plan (create / add / match / conflict) (`POST /api/portals/[id]/diff` + `SchemaPlanner` client component on `/portals/[id]/schema`)
+- [x] Create only missing tables and columns; never drop or retype (`POST /api/portals/[id]/provision` wires it end-to-end; UI shows a Provision button when `plan.ok && has changes`)
+- [x] Topologically ordered provisioning (foreign tables first) (`lib/graph.ts`; provisioner + importer both consume it)
+- [x] Resolve `foreignTable` → `foreignTableId` and `foreignDisplayColumn` → `foreignColumnId` (Phase-0 F0-2: HubSpot accepts name-based FK; happy path skips id translation)
+- [x] Default `foreignDisplayColumn` to target's natural key column when absent (`resolveDefaults` in `lib/schema.ts`)
+- [x] Cycle handling: create tables without FK cols, PATCH cols in after (`lib/graph.ts::breakCycles` + `lib/hubdb/provision.ts` two-phase)
 - [ ] Write provisioned table IDs back into mapping profile
 
 ## F4 — Column mapping UI
-- [ ] Auto-match source → target on normalized name
-- [ ] Show target column type; flag type mismatches
-- [ ] Explicit "ignored" toggle for unmapped source columns
-- [ ] Natural key selector (one or more columns per table)
-- [ ] `hs_name` / `hs_path` mapping with lowercase + uniqueness validation
+- [x] Auto-match source → target on normalized name (`lib/mapping.ts::autoMap` + `normalizeIdent`; claim-once — a target column can only be assigned to one source header)
+- [x] Show target column type; flag type mismatches (`detectTypeMismatch` fires on NUMBER/CURRENCY/BOOLEAN/DATE/DATETIME; TEXT/RICHTEXT/URL are permissive)
+- [x] Explicit "ignored" toggle for unmapped source columns (assignment kinds are `mapped` / `ignored` / `unmapped`; three-way dropdown per row)
+- [x] Natural key selector (one or more columns per table) (checkboxes on mapped rows; re-fires `validateSource` client-side so `duplicate-natural-key` warning appears the moment a key is picked)
+- [x] `hs_name` / `hs_path` mapping with lowercase + uniqueness validation (fields appear only when target `useForPages`; `validatePathColumn` flags non-lowercase / invalid-char / duplicate / empty)
 
 ## F5 — Foreign relationship config
-- [ ] Per-FK-column panel: pick foreign source table (pre-filled from `foreignTableId`)
-- [ ] Pick match key (foreign table column whose values appear in main file)
-- [ ] Multi-value toggle + delimiter picker (`,` `|` `;` newline)
-- [ ] `onMissing` selector: `fail` | `skip row` | `null the cell` | `create stub row`
-- [ ] Matching mode: default (trim + casefold) vs strict
-- [ ] Support multiple FK columns per table, resolved independently
+- [x] Per-FK-column panel: pick foreign source table (pre-filled from `foreignTableId`) (`ForeignKeyPanel` in `mapping-editor.tsx`; auto-inserted for every mapped source column whose target is `FOREIGN_ID`)
+- [x] Pick match key (foreign table column whose values appear in main file) (dropdown seeded from the chosen foreign source's headers; independent of HubSpot's `foreignColumnId`)
+- [x] Multi-value toggle + delimiter picker (`,` `|` `;` newline) (delimiter disabled until multi-value is on)
+- [x] `onMissing` selector: `fail` | `skip row` | `null the cell` | `create stub row` (config only; runtime enforcement lives in `lib/hubdb/import.ts` and the F7 dry run)
+- [x] Matching mode: default (trim + casefold) vs strict (`FkMatching` type; `normalizeOptionsFor` toggles `lib/resolve`'s NormalizeOptions)
+- [x] Support multiple FK columns per table, resolved independently (foreignKeys map keyed by source column; each panel is standalone with its own live-resolvability counts via `countResolvable`)
 
 ## F6 — Dependency ordering
-- [ ] `lib/graph.ts` — directed graph from FK relationships (shared with provisioner)
-- [ ] Topological sort
-- [ ] Cycle detection: reject with clear message OR offer two-phase write
-- [ ] Show resolved import order in UI before running
+- [x] `lib/graph.ts` — directed graph from FK relationships (shared with provisioner)
+- [x] Topological sort
+- [x] Cycle detection: reject with clear message OR offer two-phase write (`breakCycles` + deferred-edges output)
+- [x] Show resolved import order in UI before running (`ImportOrderPanel` on `/import` — appears once any mapping has FK configs; renders the toposort or the cycle-break order with deferred-edge callouts)
 
 ## F7 — Dry run
-- [ ] Mandatory before first execute of any mapping
-- [ ] Report: rows to create/update, refs resolved/unresolved (with row# + value), coercion warnings, projected API call count
-- [ ] No writes performed
-- [ ] Download unresolved-references CSV
+- [ ] Mandatory before first execute of any mapping (UX gate — will land with F8 execution)
+- [x] Report: rows to create/update, refs resolved/unresolved (with row# + value), coercion warnings, projected API call count (`lib/dry-run.ts::computeDryRun`, `POST /api/portals/[id]/dry-run`, `DryRunPanel` on /import)
+- [x] No writes performed (endpoint only calls `listAllDraftRows`; no POST/PATCH)
+- [x] Download unresolved-references CSV (client-side blob download from `DryRunPanel`; columns: sourceTable, rowIndex, sourceColumn, foreignSource, matchKey, value)
 
 ## F8 — Execution
 - [x] `lib/resolve.ts` — key map builder + foreign resolution
@@ -72,9 +72,10 @@
 - [x] Pass 2: main table rows with FK cell values as `[{ id, type: "foreignid" }]`
 - [x] Batch at 100 rows per API call
 - [x] Upsert: PATCH matches, POST rest (matched by natural key)
-- [ ] Persist job + batch cursor to Supabase
+- [ ] Persist job + batch cursor to Supabase (deferred — F11 territory)
 - [x] Retry on 429/5xx with exponential backoff, honor `Retry-After` (wrapper-level)
-- [ ] Throttle to stay under request-per-10s ceiling
+- [ ] Throttle to stay under request-per-10s ceiling (deferred)
+- [x] UI wiring: `POST /api/portals/[id]/execute` + `ExecutePanel` on /import (synthesizes schema+rows from mapping state via `lib/execution.ts::synthesizeExecution`, calls `importRows`, optional publish step in dep order)
 - [ ] Cancel button — stops at batch boundary
 - [ ] Runner separate from request handler (SSE subscriber, closing tab doesn't kill job)
 - [ ] Bounded slice per invocation + re-enqueue (or queue worker) for long jobs

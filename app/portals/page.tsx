@@ -49,6 +49,12 @@ export default async function PortalsPage() {
                   <span className="ml-auto text-xs text-muted-foreground">
                     {new Date(p.createdAt).toLocaleDateString()}
                   </span>
+                  <Link
+                    href={`/portals/${p.id}/schema`}
+                    className="text-xs underline underline-offset-2 hover:text-foreground"
+                  >
+                    schema →
+                  </Link>
                 </li>
               ))}
             </ul>
