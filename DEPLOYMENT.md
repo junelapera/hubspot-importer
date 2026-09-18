@@ -28,10 +28,11 @@ Save as `PORTAL_TOKEN_ENCRYPTION_KEY`.
 
 1. Import the repo. Vercel auto-detects Next.js.
 2. **Project → Settings → Node.js Version → 22.x** (this repo's `.nvmrc` and `package.json` `engines` both say `>=22`, but Vercel's dashboard is the actual runtime pin).
-3. **Project → Settings → Environment Variables**, set all three for Production and Preview:
+3. **Project → Settings → Environment Variables**, set for Production and Preview:
    - `SUPABASE_URL`
    - `SUPABASE_SERVICE_ROLE_KEY`
    - `PORTAL_TOKEN_ENCRYPTION_KEY`
+   - `BASIC_AUTH_USER` + `BASIC_AUTH_PASSWORD` — HTTP Basic Auth credentials. **Required on Hobby tier** since Vercel Hobby serves the app publicly. Setting only one of them makes every request 401 (fail-closed foot-gun guard).
 4. Deploy.
 
 `vercel.json` at the repo root already sets `maxDuration: 300` (5 minutes) on the execute route. Requires a Pro plan; Hobby caps at 10s for Node functions and imports will time out. See `docs/long-job-runner.md` for the plan to lift that ceiling.
@@ -53,8 +54,19 @@ Save as `PORTAL_TOKEN_ENCRYPTION_KEY`.
 | `SUPABASE_URL` | Supabase → Settings → API | Public URL, safe to expose but we keep it server-side. |
 | `SUPABASE_SERVICE_ROLE_KEY` | Supabase → Settings → API | **Server-side only.** Bypasses RLS. Never send to browser. |
 | `PORTAL_TOKEN_ENCRYPTION_KEY` | Generated once (see above) | 32 bytes base64. Rotating this loses every stored HubSpot token. Back it up. |
+| `BASIC_AUTH_USER` / `BASIC_AUTH_PASSWORD` | Chosen at deploy time | Shared credentials that gate every request via `middleware.ts`. Required on Vercel Hobby (public by default). Leave both unset locally to skip auth in dev; setting only one fails closed. |
 | `HUBSPOT_TOKEN` | `.env.local` only | Read by `scripts/spike/*.ts` for one-off checks. Not read by app code — production portals come from the `portals` table via `getPortalToken`. Don't set on Vercel. |
 | `HUBSPOT_PORTAL_ID` | `.env.local` only | Same — spike-scripts only. |
+
+## Basic Auth gate
+
+`middleware.ts` at the repo root runs on Vercel's Edge Runtime and gates the entire app (all pages + API routes) behind HTTP Basic Auth when both env vars are set. The setup:
+
+- **Local dev**: leave both `BASIC_AUTH_USER` and `BASIC_AUTH_PASSWORD` unset in `.env.local`. Middleware falls through — no browser prompt.
+- **Vercel Hobby (public by default)**: set both. Every browser visit prompts once for the shared credential; browser remembers it for the session. Every `curl` needs `-u user:pass` or an `Authorization: Basic <base64>` header.
+- **Partial config**: setting only one env var returns 401 on every request. This is intentional — a half-configured gate that let anything through would be worse than a broken one.
+
+Password rotation: change the env var in Vercel dashboard and redeploy. Old sessions get 401 on their next request. There's no user table — this is a shared credential, not per-user auth. For multi-user or SSO, upgrade to NextAuth / Clerk / Supabase Auth (Phase 3 territory).
 
 ## Known deployment caveats
 
