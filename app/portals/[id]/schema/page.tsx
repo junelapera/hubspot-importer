@@ -4,6 +4,7 @@ import { getPortalById, getPortalToken } from "@/lib/db/portals";
 import { createSupabaseServerClient } from "@/lib/db/supabase";
 import { createHubdbClient, fetchPortalSchema, isPublished } from "@/lib/hubdb";
 import type { HubdbColumn, PortalSchemaTable } from "@/lib/hubdb";
+import { DropTableButton } from "./drop-table-button";
 import { RefreshButton } from "./refresh-button";
 import { SchemaPlanner } from "./schema-planner";
 
@@ -75,7 +76,7 @@ export default async function PortalSchemaPage({ params }: Props) {
         <ul className="space-y-4">
           {snapshot.tables.map((t) => (
             <li key={t.id}>
-              <TableCard table={t} />
+              <TableCard table={t} portalId={id} portalEnv={portal.env} />
             </li>
           ))}
         </ul>
@@ -92,7 +93,15 @@ export default async function PortalSchemaPage({ params }: Props) {
   );
 }
 
-function TableCard({ table }: { table: PortalSchemaTable }) {
+function TableCard({
+  table,
+  portalId,
+  portalEnv,
+}: {
+  table: PortalSchemaTable;
+  portalId: string;
+  portalEnv: "sandbox" | "production";
+}) {
   const published = isPublished(table);
   return (
     <article className="space-y-3 rounded-md border border-border p-4">
@@ -109,6 +118,12 @@ function TableCard({ table }: { table: PortalSchemaTable }) {
               {table.rowCount.toLocaleString()} row{table.rowCount === 1 ? "" : "s"}
             </span>
           ) : null}
+          <DropTableButton
+            portalId={portalId}
+            tableId={table.id}
+            tableLabel={table.label ?? table.name}
+            portalEnv={portalEnv}
+          />
         </span>
       </header>
 

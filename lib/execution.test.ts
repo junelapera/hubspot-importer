@@ -78,6 +78,76 @@ describe("synthesizeExecution — FK translation", () => {
     expect(brandCol?.foreignColumn).toBe("slug");
   });
 
+  it("emits fkOptions.onMissing when the user picks 'null' and omits it for 'skip-row'", () => {
+    const productsNull: MappingState = {
+      ...productsMapping,
+      foreignKeys: {
+        brand: {
+          ...initialForeignKeyConfig(),
+          sourceTable: "brands",
+          matchKey: "slug",
+          onMissing: "null",
+        },
+      },
+    };
+    const syn = synthesizeExecution({
+      sources: [
+        { name: "brands", rows: [] },
+        { name: "products", rows: [] },
+      ],
+      mappings: { brands: brandsMapping, products: productsNull },
+      portalTables: [brands, products],
+    });
+    expect(syn.issues).toEqual([]);
+    expect(syn.fkOptions.products?.brand).toEqual({ onMissing: "null" });
+
+    // `skip-row` is the executor default and is omitted from fkOptions to keep the object small.
+    const productsSkip: MappingState = {
+      ...productsMapping,
+      foreignKeys: {
+        brand: {
+          ...initialForeignKeyConfig(),
+          sourceTable: "brands",
+          matchKey: "slug",
+          onMissing: "skip-row",
+        },
+      },
+    };
+    const synSkip = synthesizeExecution({
+      sources: [
+        { name: "brands", rows: [] },
+        { name: "products", rows: [] },
+      ],
+      mappings: { brands: brandsMapping, products: productsSkip },
+      portalTables: [brands, products],
+    });
+    expect(synSkip.fkOptions.products).toBeUndefined();
+  });
+
+  it("passes onMissing='create-stub' through to fkOptions and no longer rejects at synth", () => {
+    const productsStub: MappingState = {
+      ...productsMapping,
+      foreignKeys: {
+        brand: {
+          ...initialForeignKeyConfig(),
+          sourceTable: "brands",
+          matchKey: "slug",
+          onMissing: "create-stub",
+        },
+      },
+    };
+    const syn = synthesizeExecution({
+      sources: [
+        { name: "brands", rows: [] },
+        { name: "products", rows: [] },
+      ],
+      mappings: { brands: brandsMapping, products: productsStub },
+      portalTables: [brands, products],
+    });
+    expect(syn.issues).toEqual([]);
+    expect(syn.fkOptions.products?.brand).toEqual({ onMissing: "create-stub" });
+  });
+
   it("flags fk-target-column-missing when sibling doesn't map matchKey", () => {
     const badBrands: MappingState = {
       ...brandsMapping,
@@ -114,13 +184,26 @@ describe("synthesizeExecution — guard rails", () => {
     expect(syn.schema).toBeNull();
   });
 
-  it("reports composite-natural-key (v1 unsupported)", () => {
+  it("passes composite natural keys through as an array of target columns", () => {
+    const t2 = table("brands", "T1", [
+      { name: "slug", type: "TEXT" },
+      { name: "name", type: "TEXT" },
+    ]);
+    const composite: MappingState = {
+      ...base,
+      columnMap: {
+        slug: { kind: "mapped", targetColumn: "slug" },
+        name: { kind: "mapped", targetColumn: "name" },
+      },
+      naturalKey: ["slug", "name"],
+    };
     const syn = synthesizeExecution({
       sources: [{ name: "brands", rows: [] }],
-      mappings: { brands: { ...base, naturalKey: ["slug", "name"] } },
-      portalTables: [t],
+      mappings: { brands: composite },
+      portalTables: [t2],
     });
-    expect(syn.issues[0]?.kind).toBe("composite-natural-key");
+    expect(syn.issues).toEqual([]);
+    expect(syn.schema?.tables[0]?.naturalKey).toEqual(["slug", "name"]);
   });
 
   it("reports natural-key-not-mapped when the source NK isn't mapped through", () => {

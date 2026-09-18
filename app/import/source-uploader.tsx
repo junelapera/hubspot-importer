@@ -13,6 +13,7 @@ import {
 import { ImportOrderPanel } from "./import-order-panel";
 import { DryRunPanel } from "./dry-run-panel";
 import { ExecutePanel } from "./execute-panel";
+import { ProfilePanel } from "./profile-panel";
 import { deriveImportOrder } from "@/lib/mapping";
 
 type ParsedTable = {
@@ -50,6 +51,7 @@ export function SourceUploader({ portals }: { portals: PortalSummary[] }) {
   const [portalSchemaState, setPortalSchemaState] = useState<"idle" | "loading" | "error" | "ready">("idle");
   const [portalSchemaError, setPortalSchemaError] = useState<string | null>(null);
   const [mappings, setMappings] = useState<Record<string, MappingState>>({});
+  const [selectedProfileId, setSelectedProfileId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!portalId) return;
@@ -88,6 +90,14 @@ export function SourceUploader({ portals }: { portals: PortalSummary[] }) {
   function updateMapping(sourceName: string, next: MappingState) {
     setMappings((prev) => ({ ...prev, [sourceName]: next }));
   }
+
+  function loadProfile(next: Record<string, MappingState>, profileId: string) {
+    setMappings(next);
+    setSelectedProfileId(profileId);
+  }
+
+  const currentSourceNames =
+    state.kind === "success" ? state.response.tables.map((t) => t.name) : [];
 
   async function submitCsv(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -159,6 +169,16 @@ export function SourceUploader({ portals }: { portals: PortalSummary[] }) {
           Parsing runs entirely on the server; the portal isn&apos;t contacted until the mapping + provisioning steps.
         </p>
       </section>
+
+      {portalId ? (
+        <ProfilePanel
+          portalId={portalId}
+          mappings={mappings}
+          currentSourceNames={currentSourceNames}
+          onLoad={loadProfile}
+          onSelectionCleared={() => setSelectedProfileId(null)}
+        />
+      ) : null}
 
       <section className="space-y-4">
         <div className="flex items-center gap-2">
@@ -266,6 +286,7 @@ export function SourceUploader({ portals }: { portals: PortalSummary[] }) {
           portalSchemaError={portalSchemaError}
           mappings={mappings}
           onMappingChange={updateMapping}
+          profileId={selectedProfileId}
         />
       ) : null}
     </div>
@@ -352,6 +373,7 @@ function Results({
   portalSchemaError,
   mappings,
   onMappingChange,
+  profileId,
 }: {
   response: ParseResponse;
   portalId: string;
@@ -360,6 +382,7 @@ function Results({
   portalSchemaError: string | null;
   mappings: Record<string, MappingState>;
   onMappingChange: (source: string, next: MappingState) => void;
+  profileId: string | null;
 }) {
   return (
     <section className="space-y-6">
@@ -404,6 +427,7 @@ function Results({
                 portalId={portalId}
                 sources={allSources}
                 mappings={mappings}
+                profileId={profileId}
                 disabled={false}
                 disabledReason="Run a dry run first to preview what will happen — the API endpoint will still refuse execution if the synthesized mapping isn't valid."
               />

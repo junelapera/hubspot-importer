@@ -33,14 +33,10 @@ export default function Home() {
           ready
         />
         <SectionLink
-          href="#"
-          title="Runs"
-          desc="Dry-run and execute imports; watch progress (F7–F8)."
-        />
-        <SectionLink
-          href="#"
-          title="Results"
-          desc="Per-table stats and row-level error logs (F10)."
+          href="/jobs"
+          title="Jobs"
+          desc="History of imports, dry runs, and publishes with per-table totals and row-error logs (F10 + F11)."
+          ready
         />
       </nav>
 

@@ -1,16 +1,24 @@
-import type { HubdbTable } from "./hubdb";
+import type { HubdbTable, FkColumnOption } from "./hubdb";
 import type { ForeignKeyConfig, MappingState } from "./mapping";
 import type { Schema, SchemaColumn, SchemaTable } from "./schema";
 
 // F8 — translate the /import wizard state (sources + mappings) into an
-// `importRows` input triple: a synthesized schema, a tableIds map, and
-// source rows re-keyed to target column names.
+// `importRows` input triple: a synthesized schema, a tableIds map, source
+// rows re-keyed to target column names, and per-column FK options for the
+// executor.
 //
 // Rationale: `lib/hubdb/import.ts` uses each schema column's `name` as
 // BOTH the source-row lookup key and the HubDB values key. When the
 // mapping renames columns (source `Product Name` → target `productName`)
 // we transform the source row so its keys match the schema column names.
 // Everything downstream then operates in "target space".
+//
+// Composite naturalKeys pass through: the synthesized schema's
+// `naturalKey` becomes an array of target column names.
+//
+// Multi-value FKs pass through via `fkOptions`: the importer inspects the
+// per-column `{multi, delimiter}` config to split the raw string cell
+// before resolving.
 
 export interface ExecutionSourceInput {
   name: string;
@@ -26,7 +34,6 @@ export interface ExecutionSynthesisInput {
 export type ExecutionSynthesisIssue =
   | { kind: "missing-target"; source: string; targetName: string | null }
   | { kind: "missing-natural-key"; source: string }
-  | { kind: "composite-natural-key"; source: string }
   | { kind: "natural-key-not-mapped"; source: string; column: string }
   | { kind: "fk-target-column-missing"; source: string; column: string; foreignSource: string; matchKey: string };
 
@@ -34,6 +41,7 @@ export interface ExecutionSynthesis {
   schema: Schema | null;
   tableIds: Record<string, string>;
   source: Record<string, Record<string, unknown>[]>;
+  fkOptions: Record<string, Record<string, FkColumnOption>>;
   issues: ExecutionSynthesisIssue[];
 }
 
@@ -52,6 +60,7 @@ export function synthesizeExecution(input: ExecutionSynthesisInput): ExecutionSy
   const issues: ExecutionSynthesisIssue[] = [];
   const tableIds: Record<string, string> = {};
   const source: Record<string, Record<string, unknown>[]> = {};
+  const fkOptions: Record<string, Record<string, FkColumnOption>> = {};
   const schemaTables: SchemaTable[] = [];
 
   for (const s of input.sources) {
@@ -73,20 +82,28 @@ export function synthesizeExecution(input: ExecutionSynthesisInput): ExecutionSy
       issues.push({ kind: "missing-natural-key", source: s.name });
       continue;
     }
-    if (mapping.naturalKey.length > 1) {
-      issues.push({ kind: "composite-natural-key", source: s.name });
-      continue;
+
+    // Translate each source natural-key column to its target column name.
+    // Any single column failing translation is a hard issue for the whole
+    // source-table (natural key is used for identity, not just data).
+    const targetNkCols: string[] = [];
+    let nkFailed = false;
+    for (const sourceNkCol of mapping.naturalKey) {
+      const targetNkCol = mapTargetName(mapping, sourceNkCol);
+      if (!targetNkCol) {
+        issues.push({ kind: "natural-key-not-mapped", source: s.name, column: sourceNkCol });
+        nkFailed = true;
+        break;
+      }
+      targetNkCols.push(targetNkCol);
     }
-    const sourceNkCol = mapping.naturalKey[0];
-    const targetNkCol = mapTargetName(mapping, sourceNkCol);
-    if (!targetNkCol) {
-      issues.push({ kind: "natural-key-not-mapped", source: s.name, column: sourceNkCol });
-      continue;
-    }
+    if (nkFailed) continue;
 
     // Build the schema columns from mapped source columns. Each column's
     // `name` is the TARGET column name; the type comes from the portal.
     const columns: SchemaColumn[] = [];
+    const tableFkOptions: Record<string, FkColumnOption> = {};
+    let synthFailed = false;
     for (const [sourceCol, assignment] of Object.entries(mapping.columnMap)) {
       if (assignment.kind !== "mapped") continue;
       const tc = target.columns.find((c) => c.name === assignment.targetColumn);
@@ -116,31 +133,53 @@ export function synthesizeExecution(input: ExecutionSynthesisInput): ExecutionSy
             foreignSource: fk.sourceTable,
             matchKey: fk.matchKey,
           });
-          continue;
+          synthFailed = true;
+          break;
         }
         col.foreignColumn = siblingTargetCol;
+
+        const opt: FkColumnOption = {};
+        if (fk.multi) {
+          opt.multi = true;
+          opt.delimiter = fk.delimiter;
+        }
+        // Only emit `onMissing` when the user picked something other than
+        // the default `skip-row`. Keeps synthesized `fkOptions` small and
+        // matches the executor default.
+        if (fk.onMissing && fk.onMissing !== "skip-row") {
+          opt.onMissing = fk.onMissing;
+        }
+        if (opt.multi || opt.onMissing) tableFkOptions[tc.name] = opt;
       }
       columns.push(col);
     }
+    if (synthFailed) continue;
 
-    if (!columns.some((c) => c.name === targetNkCol)) {
-      issues.push({ kind: "natural-key-not-mapped", source: s.name, column: sourceNkCol });
-      continue;
+    for (const nkCol of targetNkCols) {
+      if (!columns.some((c) => c.name === nkCol)) {
+        issues.push({
+          kind: "natural-key-not-mapped",
+          source: s.name,
+          column: nkCol,
+        });
+        nkFailed = true;
+        break;
+      }
     }
+    if (nkFailed) continue;
 
     schemaTables.push({
       name: s.name,
       label: s.name,
-      naturalKey: targetNkCol,
+      naturalKey: targetNkCols.length === 1 ? targetNkCols[0] : targetNkCols,
       columns,
     });
     tableIds[s.name] = target.id;
+    if (Object.keys(tableFkOptions).length > 0) fkOptions[s.name] = tableFkOptions;
 
     // Transform source rows: {targetCol: source[sourceCol]} for every
-    // mapped column. Multi-value FKs stay as raw strings and get split
-    // during the row-plan step (importRows accepts a scalar or array;
-    // to trigger multi-value the transformer would need to pre-split
-    // here — for v1 we punt: single-value FKs only in the execute path).
+    // mapped column. FK cells stay as raw strings — the importer splits
+    // multi-value cells at plan time using fkOptions.
     const transformed: Record<string, unknown>[] = [];
     for (const row of s.rows) {
       const out: Record<string, unknown> = {};
@@ -157,5 +196,5 @@ export function synthesizeExecution(input: ExecutionSynthesisInput): ExecutionSy
   const schema: Schema | null =
     schemaTables.length > 0 ? { version: 1, tables: schemaTables } : null;
 
-  return { schema, tableIds, source, issues };
+  return { schema, tableIds, source, fkOptions, issues };
 }

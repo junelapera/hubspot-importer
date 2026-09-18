@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { parseSchema } from "../schema";
 import {
+  ImportFailFastError,
   ImportPreflightError,
   importRows,
   type ImportEvent,
@@ -220,6 +221,7 @@ describe("importRows", () => {
     expect(products?.errors[0]).toMatchObject({
       kind: "unresolved-fk",
       sourceIndex: 1,
+      column: "brand",
     });
     const productsCreate = ops.calls.find((c) => c.op === "create" && c.ref === "20");
     if (!productsCreate || productsCreate.op !== "create") throw new Error("expected create call");
@@ -238,7 +240,10 @@ describe("importRows", () => {
       },
     });
     expect(result.ok).toBe(false);
-    expect(result.tables[0].errors[0]).toMatchObject({ kind: "missing-natural-key" });
+    expect(result.tables[0].errors[0]).toMatchObject({
+      kind: "missing-natural-key",
+      column: "slug",
+    });
     expect(ops.calls.filter((c) => c.op === "create")).toHaveLength(0);
   });
 
@@ -320,5 +325,288 @@ describe("importRows", () => {
       "batch-create:products",
       "table-done:products",
     ]);
+  });
+
+  it("supports composite naturalKey — dedupes existing rows by both parts and upserts", async () => {
+    const composite = parseSchema({
+      version: 1,
+      tables: [
+        {
+          name: "variants",
+          label: "Variants",
+          naturalKey: ["sku", "color"],
+          columns: [
+            { name: "sku", type: "TEXT" },
+            { name: "color", type: "TEXT" },
+            { name: "price", type: "NUMBER" },
+          ],
+        },
+      ],
+    });
+    const ops = fakeOps({
+      "30": [
+        { id: "500", values: { sku: "SKU-1", color: "red", price: 10 } },
+      ],
+    });
+    const result = await importRows(ops, {
+      schema: composite,
+      tableIds: { variants: "30" },
+      source: {
+        variants: [
+          { sku: "SKU-1", color: "red", price: "12" }, // update by composite match
+          { sku: "SKU-1", color: "blue", price: "13" }, // new (different variant of same sku)
+          { sku: "SKU-2", color: "red", price: "14" }, // new (different sku)
+        ],
+      },
+    });
+    expect(result.ok).toBe(true);
+    const table = result.tables[0];
+    expect(table).toMatchObject({ name: "variants", created: 2, updated: 1, skipped: 0 });
+    expect(table.errors).toEqual([]);
+  });
+
+  it("onMissing='fail' aborts the whole run and throws ImportFailFastError with partial totals", async () => {
+    const ops = fakeOps();
+    let caught: ImportFailFastError | null = null;
+    try {
+      await importRows(ops, {
+        schema: brandsProducts,
+        tableIds,
+        source: {
+          brands: [{ name: "A", slug: "brand-a" }, { name: "B", slug: "brand-b" }],
+          products: [
+            { sku: "P-1", title: "Ok", brand: "brand-a" },
+            { sku: "P-2", title: "Orphan", brand: "brand-nope" }, // triggers fail
+            { sku: "P-3", title: "NeverRuns", brand: "brand-b" },
+          ],
+        },
+        fkOptions: {
+          products: { brand: { onMissing: "fail" } },
+        },
+      });
+    } catch (err) {
+      if (err instanceof ImportFailFastError) caught = err;
+      else throw err;
+    }
+    expect(caught).not.toBeNull();
+    expect(caught!.row).toMatchObject({
+      table: "products",
+      sourceIndex: 1,
+      kind: "unresolved-fk",
+      column: "brand",
+    });
+    expect(caught!.partial.ok).toBe(false);
+    // brands ran to completion; products aborted at row 1 with 2 rows skipped
+    // (the failing row + the row after it).
+    const brands = caught!.partial.tables.find((t) => t.name === "brands");
+    const products = caught!.partial.tables.find((t) => t.name === "products");
+    expect(brands).toMatchObject({ created: 2, updated: 0, skipped: 0 });
+    expect(products).toMatchObject({ skipped: 2, errors: [expect.objectContaining({ sourceIndex: 1 })] });
+    // No batch-create was issued for products (the abort happens at plan
+    // time, before batches fire).
+    const productsCreate = ops.calls.find((c) => c.op === "create" && c.ref === "20");
+    expect(productsCreate).toBeUndefined();
+  });
+
+  it("onMissing='create-stub' inserts stub rows into the foreign table and resolves the FK", async () => {
+    const ops = fakeOps();
+    const result = await importRows(ops, {
+      schema: brandsProducts,
+      tableIds,
+      source: {
+        brands: [{ name: "A", slug: "brand-a" }],
+        products: [
+          { sku: "P-1", title: "Ok", brand: "brand-a" },
+          { sku: "P-2", title: "Needs stub", brand: "brand-nope" },
+          { sku: "P-3", title: "Same stub", brand: "BRAND-NOPE" }, // dedupe target
+        ],
+      },
+      fkOptions: {
+        products: { brand: { onMissing: "create-stub" } },
+      },
+    });
+    expect(result.ok).toBe(true);
+    const brands = result.tables.find((t) => t.name === "brands")!;
+    const products = result.tables.find((t) => t.name === "products")!;
+    expect(brands).toMatchObject({ created: 1 });
+    expect(products).toMatchObject({ created: 3, skipped: 0, errors: [] });
+
+    // Two batch-create calls against brands: the initial pass (1 row) +
+    // the stub pass (1 row, deduped from "brand-nope" and "BRAND-NOPE").
+    const brandCreates = ops.calls.filter((c) => c.op === "create" && c.ref === "10");
+    expect(brandCreates).toHaveLength(2);
+    const stubBatch = brandCreates[1];
+    if (stubBatch.op !== "create") throw new Error("expected create");
+    expect(stubBatch.rows).toHaveLength(1);
+    expect(stubBatch.rows[0].values).toEqual({ slug: "brand-nope" });
+
+    // All 3 products got FK refs pointing at real ids.
+    const productsCreate = ops.calls.find((c) => c.op === "create" && c.ref === "20");
+    if (!productsCreate || productsCreate.op !== "create") throw new Error("expected products create");
+    for (const row of productsCreate.rows) {
+      const brand = row.values.brand as { id: string }[];
+      expect(Array.isArray(brand)).toBe(true);
+      expect(brand[0].id).toMatch(/^\d+$/);
+    }
+    // P-2 and P-3 both point at the same stub id.
+    const p2 = productsCreate.rows.find((r) => r.values.sku === "P-2")!;
+    const p3 = productsCreate.rows.find((r) => r.values.sku === "P-3")!;
+    expect((p2.values.brand as { id: string }[])[0].id).toBe(
+      (p3.values.brand as { id: string }[])[0].id,
+    );
+  });
+
+  it("onMissing='create-stub' handles multi-value cells with mixed hits and misses", async () => {
+    const productsTags = parseSchema({
+      version: 1,
+      tables: [
+        {
+          name: "tags",
+          label: "Tags",
+          naturalKey: "slug",
+          columns: [{ name: "slug", type: "TEXT" }],
+        },
+        {
+          name: "posts",
+          label: "Posts",
+          naturalKey: "id",
+          columns: [
+            { name: "id", type: "TEXT" },
+            { name: "tags", type: "FOREIGN_ID", foreignTable: "tags" },
+          ],
+        },
+      ],
+    });
+    const ops = fakeOps();
+    const result = await importRows(ops, {
+      schema: productsTags,
+      tableIds: { tags: "10", posts: "20" },
+      source: {
+        tags: [{ slug: "featured" }],
+        posts: [
+          // "featured" hits, "new" and "sale" miss → 2 stubs inserted, cell has 3 refs
+          { id: "post-1", tags: "featured, new, sale" },
+        ],
+      },
+      fkOptions: {
+        posts: { tags: { multi: true, delimiter: ",", onMissing: "create-stub" } },
+      },
+    });
+    expect(result.ok).toBe(true);
+    const tagCreates = ops.calls.filter((c) => c.op === "create" && c.ref === "10");
+    expect(tagCreates).toHaveLength(2); // initial pass + stub pass
+    const stubBatch = tagCreates[1];
+    if (stubBatch.op !== "create") throw new Error("expected create");
+    // The stub batch should contain new + sale, in insertion order.
+    expect(stubBatch.rows.map((r) => r.values.slug).sort()).toEqual(["new", "sale"]);
+    const postsCreate = ops.calls.find((c) => c.op === "create" && c.ref === "20");
+    if (!postsCreate || postsCreate.op !== "create") throw new Error("expected posts create");
+    const cell = postsCreate.rows[0].values.tags as { id: string }[];
+    expect(cell).toHaveLength(3);
+  });
+
+  it("onMissing='null' drops the FK column and lets the row insert", async () => {
+    const ops = fakeOps();
+    const result = await importRows(ops, {
+      schema: brandsProducts,
+      tableIds,
+      source: {
+        brands: [{ name: "A", slug: "brand-a" }],
+        products: [
+          { sku: "P-1", title: "Ok", brand: "brand-a" }, // resolves
+          { sku: "P-2", title: "Orphan", brand: "brand-nope" }, // unresolved → drop cell
+        ],
+      },
+      fkOptions: {
+        products: { brand: { onMissing: "null" } },
+      },
+    });
+    expect(result.ok).toBe(true);
+    const products = result.tables.find((t) => t.name === "products")!;
+    expect(products).toMatchObject({ created: 2, skipped: 0 });
+    expect(products.errors).toEqual([]);
+    // Verify the orphan row's brand column was dropped from the payload.
+    const productsCreate = ops.calls.find((c) => c.op === "create" && c.ref === "20");
+    if (!productsCreate || productsCreate.op !== "create") throw new Error("expected create call");
+    const orphan = productsCreate.rows.find((r) => r.values.sku === "P-2");
+    expect(orphan?.values.brand).toBeUndefined();
+  });
+
+  it("onMissing='skip-row' matches default behavior — the row errors and other rows continue", async () => {
+    const ops = fakeOps();
+    const result = await importRows(ops, {
+      schema: brandsProducts,
+      tableIds,
+      source: {
+        brands: [{ name: "A", slug: "brand-a" }],
+        products: [
+          { sku: "P-1", title: "Ok", brand: "brand-a" },
+          { sku: "P-2", title: "Orphan", brand: "brand-nope" },
+        ],
+      },
+      fkOptions: {
+        products: { brand: { onMissing: "skip-row" } },
+      },
+    });
+    expect(result.ok).toBe(false);
+    const products = result.tables.find((t) => t.name === "products")!;
+    expect(products).toMatchObject({ created: 1, skipped: 1 });
+    expect(products.errors[0]).toMatchObject({ kind: "unresolved-fk", sourceIndex: 1 });
+  });
+
+  it("splits multi-value FK cells per fkOptions and resolves each token", async () => {
+    const productsTags = parseSchema({
+      version: 1,
+      tables: [
+        {
+          name: "tags",
+          label: "Tags",
+          naturalKey: "slug",
+          columns: [
+            { name: "slug", type: "TEXT" },
+          ],
+        },
+        {
+          name: "posts",
+          label: "Posts",
+          naturalKey: "id",
+          columns: [
+            { name: "id", type: "TEXT" },
+            { name: "tags", type: "FOREIGN_ID", foreignTable: "tags" },
+          ],
+        },
+      ],
+    });
+    const ops = fakeOps();
+    const result = await importRows(ops, {
+      schema: productsTags,
+      tableIds: { tags: "10", posts: "20" },
+      source: {
+        tags: [{ slug: "featured" }, { slug: "new" }, { slug: "sale" }],
+        posts: [
+          { id: "post-1", tags: "featured, new" },
+          { id: "post-2", tags: "sale" },
+          { id: "post-3", tags: "featured|new|sale" }, // wrong delimiter → treated as one token, unresolved
+        ],
+      },
+      fkOptions: {
+        posts: { tags: { multi: true, delimiter: "," } },
+      },
+    });
+    expect(result.tables.find((t) => t.name === "tags")).toMatchObject({ created: 3 });
+    const posts = result.tables.find((t) => t.name === "posts")!;
+    expect(posts.created).toBe(2);
+    expect(posts.errors).toHaveLength(1);
+    expect(posts.errors[0]).toMatchObject({
+      sourceIndex: 2,
+      kind: "unresolved-fk",
+      column: "tags",
+    });
+    // Verify the created posts got array-of-refs FK cells.
+    const postsCreate = ops.calls.find((c) => c.op === "create" && c.ref === "20");
+    if (!postsCreate || postsCreate.op !== "create") throw new Error("expected create call");
+    const firstCell = postsCreate.rows[0].values.tags as unknown[];
+    expect(Array.isArray(firstCell)).toBe(true);
+    expect(firstCell).toHaveLength(2);
   });
 });

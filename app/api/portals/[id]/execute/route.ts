@@ -8,12 +8,22 @@ import {
   importRows,
   opsFromClientForImport,
   pushLive,
+  ImportFailFastError,
   ImportPreflightError,
   type ImportEvent,
   type ImportResult,
 } from "@/lib/hubdb";
 import { synthesizeExecution } from "@/lib/execution";
 import type { MappingState } from "@/lib/mapping";
+import { createMapping, getMappingById } from "@/lib/db/mappings";
+import {
+  completeJob,
+  createJob,
+  insertJobErrors,
+  type JobTableTotals,
+  type JobTotals,
+} from "@/lib/db/jobs";
+import type { SupabaseClient } from "@supabase/supabase-js";
 
 export const runtime = "nodejs";
 
@@ -26,16 +36,61 @@ const Body = z.object({
   sources: z.array(SourceZ).min(1),
   mappings: z.record(z.string(), z.unknown()),
   publish: z.enum(["none", "foreign-only", "all"]).optional().default("none"),
+  profileId: z.string().uuid().optional(),
 });
+
+type PublishMode = "none" | "foreign-only" | "all";
 
 function errorResponse(status: number, message: string, extra?: Record<string, unknown>) {
   return NextResponse.json({ error: message, ...extra }, { status });
+}
+
+async function resolveMappingId(
+  supabase: SupabaseClient,
+  portalId: string,
+  profileId: string | undefined,
+  mappings: Record<string, MappingState>,
+): Promise<{ mappingId: string; autoSaved: boolean } | null> {
+  try {
+    if (profileId) {
+      const profile = await getMappingById(supabase, profileId);
+      if (profile && profile.portalId === portalId) {
+        return { mappingId: profile.id, autoSaved: false };
+      }
+    }
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+    const created = await createMapping(supabase, {
+      portalId,
+      name: `run-${stamp}`,
+      state: mappings,
+    });
+    return { mappingId: created.id, autoSaved: true };
+  } catch {
+    return null;
+  }
+}
+
+function summarize(
+  result: ImportResult,
+  publish: PublishMode,
+  publishedTables: string[],
+  durationMs: number,
+): JobTotals {
+  const tables: JobTableTotals[] = result.tables.map((t) => ({
+    name: t.name,
+    created: t.created,
+    updated: t.updated,
+    skipped: t.skipped,
+    errors: t.errors.length,
+  }));
+  return { order: result.order, tables, ok: result.ok, publish, publishedTables, durationMs };
 }
 
 export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  const startedAt = Date.now();
   const { id } = await params;
   let raw: unknown;
   try {
@@ -77,31 +132,76 @@ export async function POST(
     });
   }
 
+  // Best-effort job persistence. If the F11 migration isn't applied yet, or
+  // the DB is transiently unreachable, we still run the import and return
+  // the result; the response echoes any persistence error so the UI can
+  // surface it.
+  const resolved = await resolveMappingId(supabase, id, body.data.profileId, mappings);
+  let jobId: string | null = null;
+  let persistenceError: string | null = null;
+  if (resolved) {
+    try {
+      const job = await createJob(supabase, { mappingId: resolved.mappingId, kind: "import" });
+      jobId = job.id;
+    } catch (err) {
+      persistenceError = `job create failed: ${(err as Error).message}`;
+    }
+  } else {
+    persistenceError = "could not resolve or create a mapping row (has the F11 migration been applied?)";
+  }
+
   const events: ImportEvent[] = [];
   let result: ImportResult;
   try {
     result = await importRows(
       opsFromClientForImport(client),
-      { schema: synth.schema, tableIds: synth.tableIds, source: synth.source },
+      {
+        schema: synth.schema,
+        tableIds: synth.tableIds,
+        source: synth.source,
+        fkOptions: synth.fkOptions,
+      },
       { onEvent: (e) => events.push(e) },
     );
   } catch (err) {
+    const message =
+      err instanceof ImportPreflightError
+        ? `preflight failed on "${err.table}": ${err.message}`
+        : err instanceof ImportFailFastError
+          ? err.message
+          : `import failed: ${(err as Error).message}`;
+    if (jobId) {
+      try {
+        if (err instanceof ImportFailFastError) {
+          const allErrors = err.partial.tables.flatMap((t) => t.errors);
+          await insertJobErrors(supabase, jobId, allErrors);
+        }
+        await completeJob(supabase, jobId, { status: "failed", error: message });
+      } catch (persistErr) {
+        persistenceError = (persistenceError ?? "") + ` · job complete failed: ${(persistErr as Error).message}`;
+      }
+    }
     if (err instanceof ImportPreflightError) {
-      return errorResponse(409, `preflight failed on "${err.table}": ${err.message}`, {
-        table: err.table,
+      return errorResponse(409, message, { table: err.table, events, jobId, persistenceError });
+    }
+    if (err instanceof ImportFailFastError) {
+      // 422 — request is well-formed but the data triggered fail-fast
+      // policy. Echo the failing row + the partial result so the UI can
+      // render per-table totals up to the abort point.
+      return errorResponse(422, message, {
+        row: err.row,
+        result: err.partial,
         events,
+        jobId,
+        persistenceError,
       });
     }
-    return errorResponse(502, `import failed: ${(err as Error).message}`, { events });
+    return errorResponse(502, message, { events, jobId, persistenceError });
   }
 
   const published: { table: string; publishedAt?: string; error?: string }[] = [];
   const publish = body.data.publish;
   if (publish !== "none") {
-    // Determine which tables to publish. "foreign-only" = everything
-    // except the last table in dep order (the main table). This is a
-    // rough heuristic that fits the products→brands+categories case;
-    // richer selection is F9 territory.
     const targets =
       publish === "all"
         ? result.order
@@ -119,10 +219,32 @@ export async function POST(
     }
   }
 
+  if (jobId) {
+    const durationMs = Date.now() - startedAt;
+    const publishedTables = published.filter((p) => !p.error).map((p) => p.table);
+    const totals = summarize(result, publish, publishedTables, durationMs);
+    const allErrors = result.tables.flatMap((t) => t.errors);
+    try {
+      await insertJobErrors(supabase, jobId, allErrors);
+      await completeJob(supabase, jobId, {
+        status: result.ok && published.every((p) => !p.error) ? "succeeded" : "failed",
+        totals,
+        error: result.ok ? null : `${allErrors.length} row error(s)`,
+      });
+    } catch (err) {
+      persistenceError =
+        (persistenceError ? persistenceError + " · " : "") +
+        `job finalize failed: ${(err as Error).message}`;
+    }
+  }
+
   return NextResponse.json({
     portal: { id: portal.id, label: portal.label, env: portal.env },
     result,
     events,
     published,
+    jobId,
+    persistenceError,
+    autoSavedProfile: resolved?.autoSaved ?? false,
   });
 }

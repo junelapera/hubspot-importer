@@ -2,18 +2,20 @@
 
 Self-hosted Next.js tool that imports relational data into HubSpot HubDB — resolving `FOREIGN_ID` columns automatically from human-readable natural keys (SKU, slug, name) so a `products → brands + categories` dataset lands in one pass instead of hours of manual clicking in the HubDB UI.
 
-**Status:** Phase 1 (MVP) in progress. Full lib layer shipped + tested (88 vitest cases, 7 suites). F1 (portal connection) live at `/portals` — Supabase migration applied, encrypted token storage, sandbox/prod badge. F2–F10 pending. See [`STATUS.md`](./STATUS.md) for current state.
+**Status:** Phase 1 MVP — usable end-to-end. 182 vitest cases / 14 suites. Full source → mapping → execute → publish loop runs at `/import`: portal connection, CSV/JSON source ingestion, portal introspection + provisioning, column mapping, foreign-relationship config with all four `onMissing` policies (skip-row / null / fail / create-stub), composite natural keys, multi-value FKs, dependency-ordered execution, per-table results with CSV+JSON download, mapping-profile save/load, job history at `/jobs`. Persistent sidebar nav across all pages. A handful of Phase-1 polish items (SSE progress, cancel button, cell-length caps on execute, worker-runner separation) are open — see [`STATUS.md`](./STATUS.md) and [`phases/phase-1-mvp.md`](./phases/phase-1-mvp.md).
 
 ## Docs
 
 - [`hubdb-importer-prd.md`](./hubdb-importer-prd.md) — source-of-truth PRD (v0.1)
 - [`phases/`](./phases) — per-phase task checklists (0 spike → 3 client-facing)
-- [`STATUS.md`](./STATUS.md) — running project log
+- [`STATUS.md`](./STATUS.md) — running project log — start here
+- [`DEPLOYMENT.md`](./DEPLOYMENT.md) — first-time Vercel + Supabase setup + env-var checklist
+- [`docs/long-job-runner.md`](./docs/long-job-runner.md) — Phase-2 runner rework plan (Inngest recommended)
 - [`CLAUDE.md`](./CLAUDE.md) — orientation for Claude Code sessions
 
 ## Stack
 
-Next.js 16 (App Router) · React 19 · TypeScript · Tailwind v4 · shadcn/ui on Base UI · pnpm. Supabase for job state (planned). Deploys to Vercel.
+Next.js 16 (App Router) · React 19 · TypeScript · Tailwind v4 · shadcn/ui on Base UI · pnpm. Supabase for portals + mapping profiles + job history. **Requires Node 22+** (native `WebSocket` global for supabase-js Realtime). Deploys to Vercel (see `DEPLOYMENT.md`).
 
 ## Local setup
 
@@ -24,24 +26,19 @@ cp .env.example .env.local
 
 Then fill in `.env.local` step-by-step:
 
-### 1. HubSpot private-app token (for spike scripts)
+### 1. HubSpot private-app token (for spike scripts only)
 
 Create a private app under **HubSpot → Settings → Integrations → Private Apps** with the `hubdb` (read + write) scopes. Paste the token as `HUBSPOT_TOKEN`. Copy the Hub ID from the top-right of the HubSpot UI into `HUBSPOT_PORTAL_ID`.
 
-This one is used by the `scripts/spike/*.ts` scripts only. Once F1 lands, app-side portals live in Supabase and this env var is optional.
+This is used by the `scripts/spike/*.ts` scripts only. App-side portals live in Supabase (encrypted); connect them via `/portals` in the running app.
 
 ### 2. Supabase cloud project
 
 1. Create a project at [supabase.com](https://supabase.com).
-2. Apply the Phase-1 schema migration to your project:
-   - Open **SQL Editor** in the Supabase dashboard.
-   - **Set the role selector (dropdown near the "Run" button) to `postgres`** — the default role is often read-only and DDL fails with `25006: cannot execute … in a read-only transaction`.
-   - Paste the contents of [`supabase/migrations/20260915000000_init.sql`](./supabase/migrations/20260915000000_init.sql) and run.
-   - Fallback if the role selector isn't visible: use `psql` with the connection string from **Project Settings → Database → Connection string (URI)**:
-     ```bash
-     psql "postgresql://postgres.xxxx:PASSWORD@aws-0-xxx.pooler.supabase.com:5432/postgres" \
-       -f supabase/migrations/20260915000000_init.sql
-     ```
+2. Apply the Phase-1 migrations in filename order (each one is a paste-into-SQL-Editor step; **toggle "Read only" OFF** at the top of the editor before running DDL):
+   - [`20260915000000_init.sql`](./supabase/migrations/20260915000000_init.sql) — 6 tables (`portals`, `mappings`, `jobs`, `job_batches`, `job_errors`, `key_maps`) + `set_updated_at()` trigger
+   - [`20260918000000_mapping_profiles.sql`](./supabase/migrations/20260918000000_mapping_profiles.sql) — adds `mappings.state_json` (wizard state) and `job_errors.column_name`
+   - [`20260918010000_jobs_mapping_id_set_null.sql`](./supabase/migrations/20260918010000_jobs_mapping_id_set_null.sql) — `jobs.mapping_id ON DELETE SET NULL` so deleting a profile preserves job history
 3. Copy from **Project Settings → API** into `.env.local`:
    - `Project URL` → `SUPABASE_URL`
    - `service_role` secret → `SUPABASE_SERVICE_ROLE_KEY` (server-only; do not expose to the browser)
@@ -58,10 +55,14 @@ Treat this key as long-lived — rotating it invalidates every stored HubSpot to
 
 ### 4. Run it
 
+Node 22+ required (supabase-js's Realtime constructor needs the native `WebSocket` global — retired the `ws` polyfill on 2026-09-18). If you use nvm: `nvm install 22 && nvm use` picks up the `.nvmrc`.
+
 ```bash
-pnpm dev                             # http://localhost:3000
-pnpm test:run                        # vitest, ~85 cases
-pnpm spike scripts/spike/00-ping.ts  # verify HUBSPOT_TOKEN is good
+pnpm dev                                                  # http://localhost:3000
+pnpm test:run                                             # vitest, 182 cases across 14 suites
+pnpm spike scripts/spike/00-ping.ts                       # verify HUBSPOT_TOKEN
+pnpm spike scripts/spike/12-supabase-ping.ts              # verify Supabase migration
+pnpm spike scripts/spike/14-composite-multi-onmissing.ts  # exercise the full FK matrix against the sandbox
 ```
 
 ## Commands

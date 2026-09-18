@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   buildKeyMap,
+  composeCompositeKey,
   DEFAULT_NORMALIZE,
   normalizeKey,
   resolveForeignValue,
@@ -115,6 +116,50 @@ describe("buildKeyMap", () => {
     if (!res.ok) throw new Error("expected ok");
     expect(res.map.get("42")).toBe("100");
     expect(res.map.get("7")).toBe("101");
+  });
+
+  it("supports composite naturalKey — key is the joined normalized parts", () => {
+    const rows = [
+      row("100", { sku: "SKU-1", variant: "red" }),
+      row("101", { sku: "SKU-1", variant: "blue" }),
+      row("102", { sku: "SKU-2", variant: "red" }),
+    ];
+    const res = buildKeyMap(rows, ["sku", "variant"]);
+    if (!res.ok) throw new Error("expected ok");
+    expect(res.map.size).toBe(3);
+    expect(res.map.get(composeCompositeKey({ sku: "sku-1", variant: "red" }, ["sku", "variant"]))).toBe("100");
+    expect(res.map.get(composeCompositeKey({ sku: "SKU-1", variant: "BLUE" }, ["sku", "variant"]))).toBe("101");
+  });
+
+  it("composite naturalKey — detects duplicates only when all parts match", () => {
+    const rows = [
+      row("100", { sku: "SKU-1", variant: "red" }),
+      row("101", { sku: "sku-1", variant: "RED" }), // dup after normalize
+      row("102", { sku: "SKU-2", variant: "red" }),
+    ];
+    const res = buildKeyMap(rows, ["sku", "variant"]);
+    if (res.ok) throw new Error("expected dup");
+    expect(res.duplicates).toHaveLength(1);
+    expect(res.duplicates[0].ids).toEqual(["100", "101"]);
+  });
+
+  it("composite naturalKey — skips rows with any empty component", () => {
+    const rows = [
+      row("100", { sku: "SKU-1", variant: "red" }),
+      row("101", { sku: "SKU-1", variant: "   " }), // empty after normalize
+      row("102", { sku: "", variant: "red" }),
+    ];
+    const res = buildKeyMap(rows, ["sku", "variant"]);
+    if (!res.ok) throw new Error("expected ok");
+    expect(res.map.size).toBe(1);
+  });
+
+  it("composeCompositeKey — disambiguates values that share a boundary", () => {
+    // "foo bar" + "baz" vs "foo" + "bar baz" — with a space-based separator
+    // these would collide; with the control-char separator they don't.
+    const a = composeCompositeKey({ x: "foo bar", y: "baz" }, ["x", "y"]);
+    const b = composeCompositeKey({ x: "foo", y: "bar baz" }, ["x", "y"]);
+    expect(a).not.toBe(b);
   });
 });
 

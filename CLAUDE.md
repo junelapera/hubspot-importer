@@ -4,14 +4,24 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Repository status
 
-**Phase 1 (MVP) in progress.** Full `lib/` layer is shipped and tested (169 vitest cases / 14 suites). F1 (portal connection) + F2 (source ingestion) + F3 (portal introspection UI + diff + provision) + F4 (column mapping UI) + F5 (foreign-relationship config) + F6 (dependency-order display) + F7 (dry run + unresolved-refs CSV download) + F8 (execute + optional publish) are wired end-to-end — the full source → mapping → execute → publish loop runs at `/import`. Full-pipeline sandbox spike also green (`scripts/spike/13-import-end-to-end.ts`) and the `/execute` endpoint validated via curl against fresh namespaced tables. F10 results/logging polish and F11 mapping-profile persistence are the next unblocked items.
+**Phase 1 MVP — usable end-to-end.** 182 vitest cases / 14 suites. The full source → mapping → execute → publish loop runs at `/import`: F1 (portal connection) → F2 (source ingestion) → F3 (introspection + diff + provision) → F4 (column mapping) → F5 (foreign-relationship config) → F6 (dependency-order display) → F7 (dry run + unresolved-refs CSV download) → F8 (execute + optional publish) → F10 (results & logging with CSV/JSON downloads) → F11 (mapping profile save/load + job history at `/jobs`). All four `onMissing` FK policies wired (skip-row / null / fail / create-stub). Composite naturalKey + multi-value FK working. Node 22+ required (native `WebSocket` global). Delete-table endpoint at `DELETE /api/portals/[id]/tables/[tableId]`. Both Phase-0 open questions closed via spike/15 + `docs/long-job-runner.md`. Deploy scaffolding in place (`vercel.json` + `DEPLOYMENT.md`).
+
+**Still open on `phases/phase-1-mvp.md`** (polish + robustness intentionally deferred):
+- F3: write provisioned table IDs back into mapping profile
+- F7: gate execute on completed dry run
+- F8: cancel button, per-batch cursor persistence, worker-runner separation, bounded slice + re-enqueue (all cluster under the Phase-2 runner rework in `docs/long-job-runner.md`)
+- FK correctness: stale-ID re-resolve on write error
+- Constraint enforcement: hard cell-length caps on execute (10k text / 65k rich text), lowercase page-path check on execute
+- SSE progress: `GET /api/jobs/[id]/stream` + UI subscriber
 
 - `hubdb-importer-prd.md` — the source-of-truth PRD (v0.1). Sections are stable references throughout the phase docs (F1–F11, §8, §10). **PRD §6 and §8 need revision** — see F0-2 in `phases/phase-0-spike.md`
 - `phases/phase-0-spike.md` — closed spike with 9 original findings + 3 Phase-1 addendum findings (F0-10/11/12 on PATCH semantics). Read the addendum before touching `patchTable` / `provision`
-- `phases/phase-1-mvp.md` — task checklist; check the boxes there as work lands (F1–F8 shipped; F9 publish/F10 results/F11 mapping profiles remain, plus F8's job-persistence + throttle open items)
+- `phases/phase-1-mvp.md` — task checklist; check the boxes as work lands
 - `phases/phase-2.md`, `phase-3.md` — later-phase task lists
 - `STATUS.md` — running project log: what's done, what's in flight, what's next. **Read this first** at the start of a session to catch up
-- `scripts/spike/` — one-off CLI scripts kept in-tree as regression checks and investigation traces. `00-ping` through `05-publish` proved the Phase-0 API chain; `06-11` traced the PATCH-semantics investigation (F0-10/11/12); `12-supabase-ping` verifies the Supabase migration is applied; `13-import-end-to-end` runs the full `provision → importRows → push-live → verify → cleanup` pipeline against the sandbox (also surfaced F0-13: HubDB label uniqueness). Not part of the app runtime
+- `DEPLOYMENT.md` — first-time Vercel + Supabase setup + env-var checklist
+- `docs/long-job-runner.md` — Phase-2 runner rework plan (Inngest recommended); read before touching `POST /api/portals/[id]/execute` for the resume/SSE items
+- `scripts/spike/` — one-off CLI scripts kept in-tree as regression checks and investigation traces. `00-ping` through `05-publish` proved the Phase-0 API chain; `06-11` traced the PATCH-semantics investigation (F0-10/11/12); `12-supabase-ping` verifies the Supabase migration is applied; `13-import-end-to-end` runs the full `provision → importRows → push-live → verify → cleanup` pipeline against the sandbox; `14-composite-multi-onmissing` exercises composite NK + multi-value FK + all four `onMissing` policies against real HubDB; `15-rate-limit` bursts progressive parallel reads to measure 429 threshold. Not part of the app runtime
 
 ## What's built
 
@@ -29,7 +39,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - `lib/schema.ts` — zod parse + cross-ref validation (surfaces all issues at once) + `resolveDefaults` (FK `foreignColumn` defaults to target's single-column naturalKey) + `diffSchema` returning per-table `create | match | update | conflict`
 - `lib/resolve.ts` — `normalizeKey` (trim + collapse ws + casefold), `buildKeyMap` (natural key → row id with duplicate detection), `resolveForeignValue` (all-or-nothing per cell; dedupes; empty → `[]`), `splitMultiValue`. `HUBDB_MAX_ROWS_PER_TABLE` constant
 - `lib/crypto.ts` — AES-256-GCM `encrypt`/`decrypt` returning `base64(iv || tag || ciphertext)`. Reads `PORTAL_TOKEN_ENCRYPTION_KEY`. `generateEncryptionKey()` helper
-- `lib/db/supabase.ts` — server-only `createSupabaseServerClient()` factory. Contains a `ws`-based WebSocket polyfill for Node 20 (retire when we go to Node 22)
+- `lib/db/supabase.ts` — server-only `createSupabaseServerClient()` factory. Requires Node 22+ for the native `WebSocket` global that supabase-js's Realtime constructor needs
 - `lib/db/portals.ts` — typed portal repo: `PortalRow` (server) vs `PortalSummary` (client-safe); `createPortal` / `listPortals` / `getPortalById` / `getPortalToken` (server-only decrypt) / `deletePortal`
 - `lib/source/csv.ts` — CSV parser (papaparse + BOM sniff for UTF-8/16, delimiter auto-detect, header dedup, `headerRow` override, manual overrides for all three)
 - `lib/source/json.ts` — JSON parser: two shapes (`{ table: rows[] }` or `[{ table, rows }]`), nested-value rejection with `path: "table[i].col"` pointer
@@ -53,8 +63,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - `app/portals/[id]/schema/page.tsx` + `refresh-button.tsx` — F3 introspection page. Server component decrypts the portal token and calls `fetchPortalSchema`; renders published/draft badge + row count + column list (with FK target-table + display-column ids). `RefreshButton` uses `useTransition` + `router.refresh()`
 - `app/import/page.tsx` + `source-uploader.tsx` — F2 page. Server-fetches portals for the target picker + client uploader with CSV/JSON tabs, override controls, and per-table preview grid (first 20 rows) + warnings
 - `app/portals/[id]/schema/schema-planner.tsx` — F3 diff/provision client component (paste/upload a schema definition → per-table verdict cards → Provision button when `plan.ok`)
-- `app/page.tsx` — home page linking to `/portals` and `/import`; Runs / Results shown as disabled placeholders
-- `app/layout.tsx` + `app/globals.css` — Geist wired via `next/font/google`; **watch out**: `--font-sans` in the `@theme` block must point at `--font-geist-sans` (the variable `layout.tsx` exports), not at itself, or the body font silently falls back to Times
+- `app/page.tsx` — home page with hero + 3 quick-start tiles (Portals / Import / Jobs) + footer. Sidebar handles cross-page nav so the tiles are for onboarding, not primary navigation
+- `app/nav.tsx` — `Sidebar` (fixed left, 224px, `md:` and up) + `MobileNav` (horizontal top bar under `md`). Uses `usePathname()` for active-route highlight (exact match for Home, prefix match for the rest so `/portals/[id]/schema` still highlights "Portals"). `aria-current="page"` on the active item
+- `app/layout.tsx` + `app/globals.css` — Geist wired via `next/font/google`; body is `flex` with `<Sidebar />` + `<MobileNav /> + {children}`; existing pages keep their own `<main>` inside the remaining viewport. **Watch out**: `--font-sans` in `@theme` must point at `--font-geist-sans` (the variable `layout.tsx` exports), not at itself, or the body font silently falls back to Times
 - `supabase/migrations/20260915000000_init.sql` — DDL for all 6 phase-1 tables + `set_updated_at()` trigger. Applied against the cloud project; verify via `pnpm spike scripts/spike/12-supabase-ping.ts`
 
 ## Stack
@@ -66,7 +77,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - ESLint 9 flat config (`eslint.config.mjs`)
 - **No `src/` dir** — `app/`, `components/`, `lib/`, `workers/` sit at the repo root (matches PRD §9 layout)
 - **Vitest 5** as the test runner, colocated `*.test.ts` next to source (not a `tests/` dir). Note: no `vitest.config.ts` yet — import from `lib/` with relative paths, not the `@/` alias
-- Deps: `@supabase/supabase-js`, `ws` (Node 20 WebSocket polyfill), `zod`, `papaparse`
+- Deps: `@supabase/supabase-js`, `zod`, `papaparse`, `lucide-react` (icons)
 
 ## Commands
 
@@ -95,6 +106,8 @@ pnpm spike scripts/spike/10-patch-draft-truth.ts   # verified full-replace via G
 pnpm spike scripts/spike/11-provision-update.ts    # end-to-end diffSchema → provision → verify
 pnpm spike scripts/spike/12-supabase-ping.ts       # counts rows in all 6 Supabase tables
 pnpm spike scripts/spike/13-import-end-to-end.ts   # full pipeline: provision → importRows → push-live → verify → cleanup (~10s)
+pnpm spike scripts/spike/14-composite-multi-onmissing.ts   # composite NK + multi-value FK + onMissing null/fail/create-stub (~7s)
+pnpm spike scripts/spike/15-rate-limit.ts                  # progressive parallel-read bursts + 429 measurement (~50s incl. cooldowns)
 pnpm spike scripts/spike/99-inspect.ts             # draft vs live row counts
 ```
 

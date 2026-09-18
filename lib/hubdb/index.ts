@@ -29,6 +29,7 @@ export { PUBLISHED_AT_EPOCH, isPublished } from "./types";
 
 export {
   createTable,
+  deleteTable,
   getDraftTable,
   getTable,
   listTables,
@@ -69,11 +70,14 @@ export { fetchPortalSchema } from "./portal-schema";
 export type { PortalSchemaSnapshot, PortalSchemaTable } from "./portal-schema";
 
 export {
+  ImportFailFastError,
   ImportPreflightError,
   importRows,
   opsFromClientForImport,
 } from "./import";
 export type {
+  FkColumnOption,
+  FkOnMissing,
   ImportEvent,
   ImportInput,
   ImportOps,

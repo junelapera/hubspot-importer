@@ -96,3 +96,13 @@ export async function pushLive(client: HubdbClient, ref: TableRef): Promise<Hubd
   );
   return normalizeTable(raw);
 }
+
+/**
+ * Archive a HubDB table. HubSpot returns 204 No Content on success. The
+ * table becomes unreachable via list/get; its rows are dropped.
+ */
+export async function deleteTable(client: HubdbClient, ref: TableRef): Promise<void> {
+  await client.request<void>(`/tables/${encodeURIComponent(ref)}`, {
+    method: "DELETE",
+  });
+}

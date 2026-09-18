@@ -129,7 +129,7 @@ export function initialForeignKeyConfig(): ForeignKeyConfig {
     matchKey: null,
     multi: false,
     delimiter: ",",
-    onMissing: "fail",
+    onMissing: "skip-row",
     matching: "default",
   };
 }
