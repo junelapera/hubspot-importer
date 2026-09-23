@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import type { DryRunSource } from "@/lib/dry-run";
 import type { ImportEvent, ImportResult, RowError } from "@/lib/hubdb";
@@ -27,6 +27,7 @@ type Stage =
   | { kind: "running" }
   | { kind: "error"; message: string; issues?: unknown[] }
   | { kind: "fail-fast"; response: ExecuteResponse; startedAt: string; finishedAt: string; message: string }
+  | { kind: "cancelled"; response: ExecuteResponse; startedAt: string; finishedAt: string; message: string }
   | { kind: "done"; response: ExecuteResponse; startedAt: string; finishedAt: string };
 
 export function ExecutePanel({
@@ -34,6 +35,7 @@ export function ExecutePanel({
   sources,
   mappings,
   profileId,
+  dryRunSignature,
   disabled,
   disabledReason,
 }: {
@@ -41,20 +43,31 @@ export function ExecutePanel({
   sources: DryRunSource[];
   mappings: Record<string, MappingState>;
   profileId?: string | null;
+  dryRunSignature: string | null;
   disabled: boolean;
   disabledReason?: string;
 }) {
   const [publish, setPublish] = useState<PublishMode>("foreign-only");
   const [stage, setStage] = useState<Stage>({ kind: "idle" });
+  const abortRef = useRef<AbortController | null>(null);
 
   async function run() {
     const startedAt = new Date().toISOString();
+    const controller = new AbortController();
+    abortRef.current = controller;
     setStage({ kind: "running" });
     try {
       const res = await fetch(`/api/portals/${portalId}/execute`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sources, mappings, publish, profileId: profileId ?? undefined }),
+        body: JSON.stringify({
+          sources,
+          mappings,
+          publish,
+          profileId: profileId ?? undefined,
+          dryRunSignature,
+        }),
+        signal: controller.signal,
       });
       const body = (await res.json()) as ExecuteResponse;
       const finishedAt = new Date().toISOString();
@@ -70,13 +83,44 @@ export function ExecutePanel({
           });
           return;
         }
+        // 499: server observed the cancel signal and returned a partial result
+        if (res.status === 499 && body.result) {
+          setStage({
+            kind: "cancelled",
+            response: body,
+            startedAt,
+            finishedAt,
+            message: body.error ?? "cancelled",
+          });
+          return;
+        }
         setStage({ kind: "error", message: body.error ?? `HTTP ${res.status}`, issues: body.issues });
         return;
       }
       setStage({ kind: "done", response: body, startedAt, finishedAt });
     } catch (err) {
+      // AbortError fires here when the user cancelled — the server may still
+      // finish the current batch and record the cancel in the job row, but
+      // the client has no way to see that response. Show a lightweight
+      // cancelled state so the UI reflects the user's action.
+      if ((err as Error).name === "AbortError") {
+        setStage({
+          kind: "cancelled",
+          response: {},
+          startedAt,
+          finishedAt: new Date().toISOString(),
+          message: "Cancelled — the server may still complete the current batch",
+        });
+        return;
+      }
       setStage({ kind: "error", message: (err as Error).message });
+    } finally {
+      abortRef.current = null;
     }
+  }
+
+  function cancel() {
+    abortRef.current?.abort();
   }
 
   return (
@@ -103,17 +147,29 @@ export function ExecutePanel({
               <option value="all">all</option>
             </select>
           </label>
-          <Button onClick={run} disabled={disabled || stage.kind === "running"}>
+          {stage.kind === "running" ? (
+            <Button variant="destructive" onClick={cancel}>
+              Cancel
+            </Button>
+          ) : null}
+          <Button
+            onClick={run}
+            disabled={disabled || !dryRunSignature || stage.kind === "running"}
+          >
             {stage.kind === "running"
               ? "Executing…"
-              : stage.kind === "done" || stage.kind === "fail-fast"
+              : stage.kind === "done" || stage.kind === "fail-fast" || stage.kind === "cancelled"
                 ? "Re-run"
                 : "Execute"}
           </Button>
         </div>
       </header>
 
-      {disabled && disabledReason ? (
+      {!dryRunSignature ? (
+        <p className="text-xs text-muted-foreground">
+          Run a dry run first — execute is gated on a matching dry-run signature (PRD F7).
+        </p>
+      ) : disabled && disabledReason ? (
         <p className="text-xs text-muted-foreground">{disabledReason}</p>
       ) : null}
 
@@ -151,6 +207,24 @@ export function ExecutePanel({
             startedAt={stage.startedAt}
             finishedAt={stage.finishedAt}
           />
+        </>
+      ) : null}
+
+      {stage.kind === "cancelled" ? (
+        <>
+          <div className="rounded-md border border-yellow-500/40 bg-yellow-500/10 p-3 text-sm text-yellow-900 dark:text-yellow-100 space-y-1">
+            <p className="font-semibold">Import cancelled</p>
+            <p className="text-xs">{stage.message}</p>
+          </div>
+          {stage.response.result ? (
+            <ResultView
+              response={stage.response}
+              portalId={portalId}
+              publish={publish}
+              startedAt={stage.startedAt}
+              finishedAt={stage.finishedAt}
+            />
+          ) : null}
         </>
       ) : null}
 

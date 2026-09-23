@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { parseSchema } from "../schema";
+import { HubdbError } from "./client";
 import {
+  ImportCancelledError,
   ImportFailFastError,
   ImportPreflightError,
   importRows,
@@ -608,5 +610,156 @@ describe("importRows", () => {
     const firstCell = postsCreate.rows[0].values.tags as unknown[];
     expect(Array.isArray(firstCell)).toBe(true);
     expect(firstCell).toHaveLength(2);
+  });
+
+  it("refreshes foreign key maps and retries once when a batch fails with a stale-FK-shaped error", async () => {
+    // Products table has 1 brand ("brand-a" → id 500). Source has a
+    // product referencing brand-a. The first batch-create call for
+    // products throws a stale-FK-shaped HubdbError; on retry, we
+    // re-list brands (now with a fresh id 999) and the row goes
+    // through with the refreshed id.
+    const base = fakeOps({
+      "10": [{ id: "500", values: { slug: "brand-a", name: "Alpha" } }],
+    });
+    let createFailedOnce = false;
+    let brandsListCount = 0;
+    const ops: ImportOps = {
+      ...base,
+      async listAllDraftRows(ref) {
+        if (String(ref) === "10") {
+          brandsListCount++;
+          // First list: id 500. Second list (the retry-refresh): the
+          // "old" row has been deleted and a fresh one with id 999
+          // exists.
+          if (brandsListCount === 2) {
+            return [{ id: "999", values: { slug: "brand-a", name: "Alpha" } }];
+          }
+        }
+        return base.listAllDraftRows(ref);
+      },
+      async batchCreateDraftRows(ref, rows) {
+        if (String(ref) === "20" && !createFailedOnce) {
+          createFailedOnce = true;
+          throw new HubdbError({
+            status: 400,
+            method: "POST",
+            path: "/tables/20/rows/draft/batch/create",
+            responseBody: { message: "Foreign row does not exist for column brand" },
+            rateLimit: { remaining: null, retryAfterSeconds: null },
+            attempts: 1,
+          });
+        }
+        return base.batchCreateDraftRows(ref, rows);
+      },
+    };
+    const events: ImportEvent[] = [];
+    const result = await importRows(
+      ops,
+      {
+        schema: brandsProducts,
+        tableIds,
+        source: {
+          brands: [],
+          products: [{ sku: "P-1", title: "Widget", brand: "brand-a" }],
+        },
+      },
+      { onEvent: (e) => events.push(e) },
+    );
+    expect(result.ok).toBe(true);
+    expect(result.tables.find((t) => t.name === "products")).toMatchObject({
+      created: 1,
+      errors: [],
+    });
+    // The retry emitted a stale-fk-retry event naming the brands table
+    expect(events.some((e) => e.kind === "stale-fk-retry" && e.batchKind === "create")).toBe(true);
+    // The second batch-create call used the refreshed brand id (999)
+    const productsCreates = base.calls.filter((c) => c.op === "create" && c.ref === "20");
+    // The intercepted first call threw, so only the retry recorded on base.calls
+    expect(productsCreates).toHaveLength(1);
+    if (productsCreates[0].op !== "create") throw new Error("expected create");
+    expect((productsCreates[0].rows[0].values.brand as { id: string }[])[0].id).toBe("999");
+  });
+
+  it("throws ImportCancelledError with a partial result when the AbortSignal fires between batches", async () => {
+    // 250 brand rows across 3 batches. Cancel after the first batch
+    // completes so we get a partial result with 100 created + the rest
+    // marked untouched.
+    const base = fakeOps();
+    const controller = new AbortController();
+    let batchesSeen = 0;
+    const ops: ImportOps = {
+      ...base,
+      async batchCreateDraftRows(ref, rows) {
+        batchesSeen++;
+        // Cancel after the first batch lands
+        if (batchesSeen === 1) {
+          const created = await base.batchCreateDraftRows(ref, rows);
+          controller.abort();
+          return created;
+        }
+        return base.batchCreateDraftRows(ref, rows);
+      },
+    };
+    const rows = Array.from({ length: 250 }, (_, i) => ({
+      name: `Brand ${i}`,
+      slug: `brand-${String(i).padStart(3, "0")}`,
+    }));
+    let caught: ImportCancelledError | null = null;
+    try {
+      await importRows(
+        ops,
+        {
+          schema: brandsProducts,
+          tableIds,
+          source: { brands: rows, products: [] },
+        },
+        { signal: controller.signal },
+      );
+    } catch (err) {
+      if (err instanceof ImportCancelledError) caught = err;
+      else throw err;
+    }
+    expect(caught).not.toBeNull();
+    expect(caught?.partial.ok).toBe(false);
+    const brands = caught?.partial.tables.find((t) => t.name === "brands");
+    // Cancel checked between batches — we saw exactly one batch land.
+    expect(brands?.created).toBe(100);
+    // Products table never started
+    const products = caught?.partial.tables.find((t) => t.name === "products");
+    expect(products).toMatchObject({ created: 0, updated: 0, skipped: 0 });
+    // Only one batchCreate reached the ops layer.
+    expect(base.calls.filter((c) => c.op === "create")).toHaveLength(1);
+  });
+
+  it("propagates the original error when no foreign tables are refreshable", async () => {
+    // Brands has no naturalKey → nothing to refresh. Simulate an
+    // FK-shaped error and confirm we don't swallow it.
+    const base = fakeOps();
+    const ops: ImportOps = {
+      ...base,
+      async batchCreateDraftRows(ref, rows) {
+        if (String(ref) === "10") {
+          throw new HubdbError({
+            status: 400,
+            method: "POST",
+            path: "/tables/10/rows/draft/batch/create",
+            responseBody: { message: "Something about foreign keys" },
+            rateLimit: { remaining: null, retryAfterSeconds: null },
+            attempts: 1,
+          });
+        }
+        return base.batchCreateDraftRows(ref, rows);
+      },
+    };
+    await expect(
+      importRows(ops, {
+        schema: brandsProducts,
+        tableIds,
+        source: {
+          brands: [{ name: "Alpha", slug: "brand-a" }],
+          products: [],
+        },
+      }),
+    ).rejects.toBeInstanceOf(HubdbError);
   });
 });

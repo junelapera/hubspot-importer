@@ -9,6 +9,7 @@ import {
   type HubdbRow,
 } from "@/lib/hubdb";
 import { computeDryRun, type DryRunSource } from "@/lib/dry-run";
+import { computeExecutionSignature } from "@/lib/execution";
 import type { MappingState } from "@/lib/mapping";
 
 export const runtime = "nodejs";
@@ -92,10 +93,20 @@ export async function POST(
     existingRowsByTarget,
   });
 
+  // Fingerprint of the inputs so the execute endpoint can gate on a
+  // completed dry run (PRD F7). Any change to sources or mappings
+  // invalidates it. Strip `headers` — the execute endpoint doesn't
+  // receive them, and their inclusion would make the sigs diverge.
+  const signature = computeExecutionSignature(
+    sources.map((s) => ({ name: s.name, rows: s.rows })),
+    mappings,
+  );
+
   return NextResponse.json({
     portal: { id: portal.id, label: portal.label, env: portal.env },
     fetchedAt: snapshot.fetchedAt,
     report,
+    signature,
     readErrors: Object.keys(readErrors).length ? readErrors : undefined,
   });
 }

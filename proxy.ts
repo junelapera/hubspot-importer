@@ -8,6 +8,9 @@ import { NextResponse, type NextRequest } from "next/server";
 //
 // Runs on Edge; uses `atob` + a constant-time comparison to avoid the
 // tiny timing-attack surface a naive `===` would expose.
+//
+// Renamed from middleware.ts → proxy.ts in Next 16 per the framework's
+// naming migration (same runtime, same matcher semantics).
 
 const REALM = "HubDB Importer";
 
@@ -32,7 +35,7 @@ function unauthorized(): NextResponse {
   });
 }
 
-export function middleware(req: NextRequest): NextResponse {
+export function proxy(req: NextRequest): NextResponse {
   const user = process.env.BASIC_AUTH_USER;
   const password = process.env.BASIC_AUTH_PASSWORD;
 

@@ -70,6 +70,7 @@ export { fetchPortalSchema } from "./portal-schema";
 export type { PortalSchemaSnapshot, PortalSchemaTable } from "./portal-schema";
 
 export {
+  ImportCancelledError,
   ImportFailFastError,
   ImportPreflightError,
   importRows,

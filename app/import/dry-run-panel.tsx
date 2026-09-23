@@ -15,10 +15,12 @@ export function DryRunPanel({
   portalId,
   sources,
   mappings,
+  onComplete,
 }: {
   portalId: string;
   sources: DryRunSource[];
   mappings: Record<string, MappingState>;
+  onComplete?: (signature: string) => void;
 }) {
   const [stage, setStage] = useState<Stage>({ kind: "idle" });
 
@@ -30,12 +32,17 @@ export function DryRunPanel({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ sources, mappings }),
       });
-      const body = (await res.json()) as { report?: DryRunReport; error?: string };
+      const body = (await res.json()) as {
+        report?: DryRunReport;
+        signature?: string;
+        error?: string;
+      };
       if (!res.ok || !body.report) {
         setStage({ kind: "error", message: body.error ?? `HTTP ${res.status}` });
         return;
       }
       setStage({ kind: "done", report: body.report });
+      if (body.signature) onComplete?.(body.signature);
     } catch (err) {
       setStage({ kind: "error", message: (err as Error).message });
     }

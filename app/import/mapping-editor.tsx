@@ -65,7 +65,14 @@ export function MappingEditor({
   function chooseTarget(name: string) {
     const next = portalTables.find((t) => t.name === name) ?? null;
     if (!next) {
-      onChange({ ...value, targetTableName: null, columnMap: {}, naturalKey: [], foreignKeys: {} });
+      onChange({
+        ...value,
+        targetTableName: null,
+        targetTableId: null,
+        columnMap: {},
+        naturalKey: [],
+        foreignKeys: {},
+      });
       return;
     }
     const columnMap = autoMap(source.headers, next.columns);
@@ -77,6 +84,7 @@ export function MappingEditor({
     onChange({
       ...value,
       targetTableName: name,
+      targetTableId: next.id,
       columnMap,
       naturalKey: value.naturalKey.filter((k) => columnMap[k]?.kind === "mapped"),
       hsName: next.useForPages ? value.hsName : null,
@@ -160,6 +168,11 @@ export function MappingEditor({
               </option>
             ))}
           </select>
+          {value.targetTableId ? (
+            <span className="text-xs text-muted-foreground">
+              id <code className="rounded bg-muted px-1">{value.targetTableId}</code> — cached in profile
+            </span>
+          ) : null}
         </label>
 
         {target?.useForPages ? (

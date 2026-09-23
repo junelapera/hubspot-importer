@@ -2,7 +2,7 @@
 
 Self-hosted Next.js tool that imports relational data into HubSpot HubDB — resolving `FOREIGN_ID` columns automatically from human-readable natural keys (SKU, slug, name) so a `products → brands + categories` dataset lands in one pass instead of hours of manual clicking in the HubDB UI.
 
-**Status:** Phase 1 MVP — usable end-to-end. 182 vitest cases / 14 suites. Full source → mapping → execute → publish loop runs at `/import`: portal connection, CSV/JSON source ingestion, portal introspection + provisioning, column mapping, foreign-relationship config with all four `onMissing` policies (skip-row / null / fail / create-stub), composite natural keys, multi-value FKs, dependency-ordered execution, per-table results with CSV+JSON download, mapping-profile save/load, job history at `/jobs`. Persistent sidebar nav across all pages. HTTP Basic Auth gate (`middleware.ts`) for Vercel Hobby-tier deploys. A handful of Phase-1 polish items (SSE progress, cancel button, cell-length caps on execute, worker-runner separation) are open — see [`STATUS.md`](./STATUS.md) and [`phases/phase-1-mvp.md`](./phases/phase-1-mvp.md).
+**Status:** Phase 1 MVP — usable end-to-end. 192 vitest cases / 14 suites. Full source → mapping → execute → publish loop runs at `/import`: portal connection, CSV/JSON source ingestion, portal introspection + provisioning, column mapping, foreign-relationship config with all four `onMissing` policies (skip-row / null / fail / create-stub), composite natural keys, multi-value FKs, dependency-ordered execution, per-table results with CSV+JSON download, mapping-profile save/load (with cached target-table id), job history at `/jobs`. Server-side hardening: dry-run signature gate on execute, cell-length caps (10k TEXT / 65k RICHTEXT), hs_path lowercase check, stale-FK retry (re-lists foreign tables + retries once on a foreign-shaped 4xx), cancel-at-batch-boundary. Persistent sidebar nav across all pages. HTTP Basic Auth gate (`proxy.ts`, renamed from `middleware.ts` for Next 16) for Vercel Hobby-tier deploys. A few polish items (SSE progress, per-batch cursor persistence, worker-runner separation, provision-writes-back-tableId) are still open — see [`STATUS.md`](./STATUS.md) and [`phases/phase-1-mvp.md`](./phases/phase-1-mvp.md).
 
 ## Docs
 
@@ -59,7 +59,7 @@ Node 22+ required (supabase-js's Realtime constructor needs the native `WebSocke
 
 ```bash
 pnpm dev                                                  # http://localhost:3000
-pnpm test:run                                             # vitest, 182 cases across 14 suites
+pnpm test:run                                             # vitest, 192 cases across 14 suites
 pnpm spike scripts/spike/00-ping.ts                       # verify HUBSPOT_TOKEN
 pnpm spike scripts/spike/12-supabase-ping.ts              # verify Supabase migration
 pnpm spike scripts/spike/14-composite-multi-onmissing.ts  # exercise the full FK matrix against the sandbox

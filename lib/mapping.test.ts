@@ -229,3 +229,11 @@ describe("validatePathColumn", () => {
     expect(issues.some((i) => i.kind === "duplicate")).toBe(false);
   });
 });
+
+describe("initialMappingState", () => {
+  it("defaults targetTableId to null so the cache slot exists on new profiles", () => {
+    const s = initialMappingState();
+    expect(s.targetTableId).toBeNull();
+    expect(s.targetTableName).toBeNull();
+  });
+});

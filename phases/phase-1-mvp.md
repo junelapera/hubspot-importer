@@ -61,7 +61,7 @@
 - [x] Show resolved import order in UI before running (`ImportOrderPanel` on `/import` — appears once any mapping has FK configs; renders the toposort or the cycle-break order with deferred-edge callouts)
 
 ## F7 — Dry run
-- [ ] Mandatory before first execute of any mapping (UX gate — will land with F8 execution)
+- [x] Mandatory before first execute of any mapping (UX gate — `computeExecutionSignature` in `lib/execution.ts`; dry-run returns sig; execute requires matching sig or 400s; `ExecutePanel` disables its button and any mapping/source edit clears the sig)
 - [x] Report: rows to create/update, refs resolved/unresolved (with row# + value), coercion warnings, projected API call count (`lib/dry-run.ts::computeDryRun`, `POST /api/portals/[id]/dry-run`, `DryRunPanel` on /import)
 - [x] No writes performed (endpoint only calls `listAllDraftRows`; no POST/PATCH)
 - [x] Download unresolved-references CSV (client-side blob download from `DryRunPanel`; columns: sourceTable, rowIndex, sourceColumn, foreignSource, matchKey, value)
@@ -76,7 +76,7 @@
 - [x] Retry on 429/5xx with exponential backoff, honor `Retry-After` (wrapper-level)
 - [ ] Throttle to stay under request-per-10s ceiling (deferred)
 - [x] UI wiring: `POST /api/portals/[id]/execute` + `ExecutePanel` on /import (synthesizes schema+rows from mapping state via `lib/execution.ts::synthesizeExecution`, calls `importRows`, optional publish step in dep order)
-- [ ] Cancel button — stops at batch boundary
+- [x] Cancel button — stops at batch boundary (`ImportOptions.signal?: AbortSignal`; `_CancelSignal` sentinel; execute route passes `req.signal`, returns HTTP 499 + marks job `cancelled`; `ExecutePanel` uses `AbortController` per run + shows Cancel button while running; in-flight batch always completes)
 - [ ] Runner separate from request handler (SSE subscriber, closing tab doesn't kill job)
 - [ ] Bounded slice per invocation + re-enqueue (or queue worker) for long jobs
 
@@ -96,14 +96,14 @@
 - [x] Abort validation on duplicate natural keys in foreign source (`ImportPreflightError`)
 - [x] Deduplicate repeated foreign values within a single main cell (`resolveForeignValue` dedupes by default)
 - [x] Empty FK cell → empty array (not null)
-- [ ] Detect stale ID on write error → re-resolve once, then report
+- [x] Detect stale ID on write error → re-resolve once, then report (`isPossiblyStaleFkError` heuristic + `refreshForeignKeyMaps()` closure inside `importOneTable`; retries the batch once after re-planning; still-unresolvable rows drop to `result.errors`; emits `stale-fk-retry` event)
 - [x] Self-reference tables treated as cycle (graph handles; provisioner defers)
 - [x] Block with explicit error when foreign table reaches 10k rows (`ImportPreflightError` pre-flight)
 
 ## Constraint enforcement (Section 10)
-- [x] Enforce rows/table (10k) — importer pre-flight; text (10k chars), rich text (65k chars) still TBD
+- [x] Enforce rows/table (10k) — importer pre-flight; text (10k chars) + rich text (65k chars) enforced at synth in `lib/execution.ts` (rejects with `cell-too-long` issue)
 - [x] Enforce batch size (100) — asserted in `lib/hubdb/rows.ts` and chunked in importer
-- [ ] Enforce lowercase dynamic page paths
+- [x] Enforce lowercase dynamic page paths — synth calls `validatePathColumn` when `hsPath` is set; rejects with `page-path-invalid` issue
 - [x] Paginate reads (1000-row default page size)
 
 ## SSE progress

@@ -8,12 +8,13 @@ import {
   importRows,
   opsFromClientForImport,
   pushLive,
+  ImportCancelledError,
   ImportFailFastError,
   ImportPreflightError,
   type ImportEvent,
   type ImportResult,
 } from "@/lib/hubdb";
-import { synthesizeExecution } from "@/lib/execution";
+import { computeExecutionSignature, synthesizeExecution } from "@/lib/execution";
 import type { MappingState } from "@/lib/mapping";
 import { createMapping, getMappingById } from "@/lib/db/mappings";
 import {
@@ -37,6 +38,10 @@ const Body = z.object({
   mappings: z.record(z.string(), z.unknown()),
   publish: z.enum(["none", "foreign-only", "all"]).optional().default("none"),
   profileId: z.string().uuid().optional(),
+  // PRD F7 — client must complete a dry run first and echo the returned
+  // signature. Prevents an execute against sources/mappings that were
+  // never previewed.
+  dryRunSignature: z.string().min(1),
 });
 
 type PublishMode = "none" | "foreign-only" | "all";
@@ -121,6 +126,17 @@ export async function POST(
   }
 
   const mappings = body.data.mappings as Record<string, MappingState>;
+
+  // PRD F7 — verify the client ran a dry run against these exact inputs.
+  const expectedSignature = computeExecutionSignature(body.data.sources, mappings);
+  if (expectedSignature !== body.data.dryRunSignature) {
+    return errorResponse(
+      400,
+      "dry-run signature mismatch — sources or mappings changed since the last dry run; re-run it before executing",
+      { expected: expectedSignature, received: body.data.dryRunSignature },
+    );
+  }
+
   const synth = synthesizeExecution({
     sources: body.data.sources,
     mappings,
@@ -161,7 +177,7 @@ export async function POST(
         source: synth.source,
         fkOptions: synth.fkOptions,
       },
-      { onEvent: (e) => events.push(e) },
+      { onEvent: (e) => events.push(e), signal: req.signal },
     );
   } catch (err) {
     const message =
@@ -169,14 +185,17 @@ export async function POST(
         ? `preflight failed on "${err.table}": ${err.message}`
         : err instanceof ImportFailFastError
           ? err.message
-          : `import failed: ${(err as Error).message}`;
+          : err instanceof ImportCancelledError
+            ? err.message
+            : `import failed: ${(err as Error).message}`;
     if (jobId) {
       try {
-        if (err instanceof ImportFailFastError) {
+        if (err instanceof ImportFailFastError || err instanceof ImportCancelledError) {
           const allErrors = err.partial.tables.flatMap((t) => t.errors);
           await insertJobErrors(supabase, jobId, allErrors);
         }
-        await completeJob(supabase, jobId, { status: "failed", error: message });
+        const status = err instanceof ImportCancelledError ? "cancelled" : "failed";
+        await completeJob(supabase, jobId, { status, error: message });
       } catch (persistErr) {
         persistenceError = (persistenceError ?? "") + ` · job complete failed: ${(persistErr as Error).message}`;
       }
@@ -190,6 +209,19 @@ export async function POST(
       // render per-table totals up to the abort point.
       return errorResponse(422, message, {
         row: err.row,
+        result: err.partial,
+        events,
+        jobId,
+        persistenceError,
+      });
+    }
+    if (err instanceof ImportCancelledError) {
+      // 499 — non-standard but widely-recognized "client closed request".
+      // If the client aborted the fetch (likely), they won't see this
+      // response; the job row records the cancel so /jobs still tells the
+      // story after the fact.
+      return errorResponse(499, message, {
+        cancelled: true,
         result: err.partial,
         events,
         jobId,

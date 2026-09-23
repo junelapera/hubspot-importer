@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { synthesizeExecution } from "./execution";
+import { computeExecutionSignature, synthesizeExecution } from "./execution";
 import type { HubdbTable } from "./hubdb";
 import { initialForeignKeyConfig, initialMappingState, type MappingState } from "./mapping";
+import { HUBDB_RICHTEXT_MAX, HUBDB_TEXT_MAX } from "./source/validate";
 
 function table(name: string, id: string, columns: { name: string; type: string; foreignTableId?: string }[]): HubdbTable {
   return {
@@ -213,5 +214,151 @@ describe("synthesizeExecution — guard rails", () => {
       portalTables: [t],
     });
     expect(syn.issues.some((i) => i.kind === "natural-key-not-mapped")).toBe(true);
+  });
+});
+
+describe("synthesizeExecution — cell-length caps", () => {
+  const t = table("posts", "T1", [
+    { name: "slug", type: "TEXT" },
+    { name: "body", type: "RICHTEXT" },
+  ]);
+  const mapping: MappingState = {
+    ...initialMappingState(),
+    targetTableName: "posts",
+    columnMap: {
+      slug: { kind: "mapped", targetColumn: "slug" },
+      body: { kind: "mapped", targetColumn: "body" },
+    },
+    naturalKey: ["slug"],
+  };
+
+  it("rejects TEXT cells over 10k chars with a single per-column issue", () => {
+    const oversized = "x".repeat(HUBDB_TEXT_MAX + 1);
+    const syn = synthesizeExecution({
+      sources: [
+        {
+          name: "posts",
+          rows: [
+            { slug: "ok", body: "short" },
+            { slug: oversized, body: "short" },
+          ],
+        },
+      ],
+      mappings: { posts: mapping },
+      portalTables: [t],
+    });
+    expect(syn.schema).toBeNull();
+    const issue = syn.issues.find((i) => i.kind === "cell-too-long");
+    expect(issue).toMatchObject({
+      kind: "cell-too-long",
+      source: "posts",
+      sourceColumn: "slug",
+      targetColumn: "slug",
+      targetType: "TEXT",
+      maxLength: HUBDB_TEXT_MAX,
+      count: 1,
+      sampleRowIndex: 1,
+      sampleLength: HUBDB_TEXT_MAX + 1,
+    });
+  });
+
+  it("uses the 65k richtext cap for RICHTEXT targets and accepts values within it", () => {
+    const richOk = "x".repeat(HUBDB_TEXT_MAX + 100); // over TEXT cap, under RICHTEXT cap
+    const richBad = "x".repeat(HUBDB_RICHTEXT_MAX + 1);
+    const syn = synthesizeExecution({
+      sources: [{ name: "posts", rows: [{ slug: "ok", body: richOk }, { slug: "ok2", body: richBad }] }],
+      mappings: { posts: mapping },
+      portalTables: [t],
+    });
+    const cellTooLongIssues = syn.issues.filter((i) => i.kind === "cell-too-long");
+    expect(cellTooLongIssues).toHaveLength(1);
+    expect(cellTooLongIssues[0]).toMatchObject({
+      sourceColumn: "body",
+      targetType: "RICHTEXT",
+      maxLength: HUBDB_RICHTEXT_MAX,
+    });
+  });
+});
+
+describe("synthesizeExecution — hs_path", () => {
+  const t = table("pages", "T1", [{ name: "slug", type: "TEXT" }]);
+  const base: MappingState = {
+    ...initialMappingState(),
+    targetTableName: "pages",
+    columnMap: { slug: { kind: "mapped", targetColumn: "slug" } },
+    naturalKey: ["slug"],
+    hsPath: "slug",
+  };
+
+  it("rejects uppercase / invalid-char / duplicate page paths", () => {
+    const syn = synthesizeExecution({
+      sources: [
+        {
+          name: "pages",
+          rows: [
+            { slug: "About-Us" }, // uppercase
+            { slug: "contact us" }, // space -> invalid-char
+            { slug: "home" },
+            { slug: "home" }, // duplicate
+          ],
+        },
+      ],
+      mappings: { pages: base },
+      portalTables: [t],
+    });
+    expect(syn.schema).toBeNull();
+    const issue = syn.issues.find((i) => i.kind === "page-path-invalid");
+    expect(issue?.column).toBe("slug");
+    expect(issue && "issues" in issue ? issue.issues.map((i) => i.kind).sort() : []).toEqual(
+      ["duplicate", "invalid-char", "not-lowercase"],
+    );
+  });
+
+  it("passes when every row is lowercase, URL-safe, and unique", () => {
+    const syn = synthesizeExecution({
+      sources: [{ name: "pages", rows: [{ slug: "about-us" }, { slug: "contact" }] }],
+      mappings: { pages: base },
+      portalTables: [t],
+    });
+    expect(syn.issues).toEqual([]);
+    expect(syn.schema?.tables[0]?.name).toBe("pages");
+  });
+});
+
+describe("computeExecutionSignature", () => {
+  const sources = [
+    { name: "brands", rows: [{ slug: "acme" }, { slug: "beta" }] },
+  ] as const;
+  const mapping: MappingState = {
+    ...initialMappingState(),
+    targetTableName: "brands",
+    columnMap: { slug: { kind: "mapped", targetColumn: "slug" } },
+    naturalKey: ["slug"],
+  };
+
+  it("returns the same hash regardless of key insertion order in mappings", () => {
+    const a = computeExecutionSignature(sources, { brands: mapping });
+    // Re-create the mapping object with a different property order — same
+    // logical value, different in-memory shape.
+    const reordered: MappingState = {
+      foreignKeys: mapping.foreignKeys,
+      hsPath: mapping.hsPath,
+      hsName: mapping.hsName,
+      naturalKey: mapping.naturalKey,
+      columnMap: mapping.columnMap,
+      targetTableName: mapping.targetTableName,
+      targetTableId: mapping.targetTableId,
+    };
+    const b = computeExecutionSignature(sources, { brands: reordered });
+    expect(a).toBe(b);
+  });
+
+  it("changes when a source row is edited", () => {
+    const a = computeExecutionSignature(sources, { brands: mapping });
+    const b = computeExecutionSignature(
+      [{ name: "brands", rows: [{ slug: "acme" }, { slug: "BETA" }] }],
+      { brands: mapping },
+    );
+    expect(a).not.toBe(b);
   });
 });

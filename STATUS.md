@@ -2,7 +2,60 @@
 
 Running log of where the HubDB Importer project is, what's in flight, and what's next. Update as we go.
 
-## Current state — 2026-09-18
+## Current state — 2026-09-23 (afternoon)
+
+**Five follow-on tasks shipped in one pass**, after the morning's server-side hardening:
+
+1. **Sandbox smoke test** — all three new 400s confirmed live against the Dev sandbox via curl: `dry-run signature mismatch` (400), `cell-too-long` (400, echoes count + sampleRowIndex + sampleLength), `page-path-invalid` (400, echoes full `PathValidationIssue[]` including `not-lowercase` / `invalid-char` / `duplicate`). Closes the "not sandbox-verified" caveat from the morning entry
+2. **Stale-ID retry on FK write error** — `lib/hubdb/import.ts` gains `isPossiblyStaleFkError(err)` heuristic (HubdbError with 4xx status + body hinting at "foreign" / "no such row" / "does not exist" / "not found"), a `refreshForeignKeyMaps()` closure inside `importOneTable` that re-lists every foreign table + rebuilds its key map, and a retry-once wrapper around both `batchCreateDraftRows` and `batchUpdateDraftRows`. On the retry, batches are re-planned via `planRow` (so freshly-resolved FK ids replace stale ones); any rows that still error drop cleanly into `result.errors`/`skipped`. Emits a new `stale-fk-retry` event with `{table, batchKind, refreshed}`. If no foreign tables are refreshable (schema has none, or all lack naturalKey), original error propagates. Threads `schemaByName` from `importRows` into `importOneTable` for the foreign lookup. 2 new tests: `create` fails once with a foreign-key-shaped 400 → refresh brings a fresh id (999 vs stale 500) → retry succeeds with the fresh id in the FK cell; `create` fails but no naturalKey-having foreign tables exist → HubdbError propagates
+3. **Cache provisioned table IDs in mapping profile** — `MappingState` gains optional `targetTableId?: string | null`; `initialMappingState()` seeds it as `null`; `MappingEditor::chooseTarget` populates it from the picked `HubdbTable.id`. Round-trips through the profile's `state_json` JSONB blob for free (no new migration). Displayed inline under the target picker as `id <n> — cached in profile`. Server routes still resolve by name (id is a stability/provenance hint, not a lookup key)
+4. **Cancel button** — new `ImportCancelledError` (exported from `lib/hubdb` barrel) carries a `partial: ImportResult`; new `_CancelSignal` module-private sentinel mirrors `_FailFastSignal`. `ImportOptions.signal?: AbortSignal` added; a `checkCancel()` closure inside `importOneTable` runs before each `table-start`, each update-batch, and each insert-batch (batch boundary — the in-flight HubSpot call always completes). `importRows` catches `_CancelSignal` and rethrows `ImportCancelledError` with the aborted table + placeholders for the untouched remainder. Execute route passes `req.signal` in, catches `ImportCancelledError` → HTTP 499 with `cancelled: true`, marks the job row `cancelled` in `completeJob`. `ExecutePanel` gets an `AbortController` per run, shows a red "Cancel" button while running, adds a `cancelled` stage that renders a yellow banner + partial `ResultView`. If the browser aborts before the server flushes the 499, the UI still shows a "Cancelled — server may still complete current batch" note. 1 new test: 250-row insert cancels between batches → 100 created, 150 unmarked, downstream table listed as 0/0/0
+5. **Middleware → proxy migration** (Next 16) — codemod refused (dirty tree), so did it by hand: renamed `middleware.ts` → `proxy.ts`, renamed export `function middleware` → `function proxy`. Matcher config unchanged. Verified live via curl: no creds → 401, correct creds → 200, wrong creds → 401. Dev server no longer prints the deprecation warning; startup log shows `proxy.ts: 111ms` confirming Next picked up the new convention
+
+**Files touched:** `lib/hubdb/import.ts`, `lib/hubdb/index.ts`, `lib/hubdb/import.test.ts`, `lib/mapping.ts`, `lib/mapping.test.ts`, `lib/execution.test.ts`, `app/api/portals/[id]/execute/route.ts`, `app/import/execute-panel.tsx`, `app/import/mapping-editor.tsx`, `middleware.ts` → `proxy.ts`. **192 vitest cases / 14 suites** (+4 net-new this pass). tsc clean, lint clean
+
+**Design decisions worth remembering:**
+- **Stale-FK detector is deliberately broad.** No documented HubSpot error code for stale FK id; matched on 4xx + string hints. False positives cost one extra list-per-foreign-table read — acceptable versus the risk of missing real cases
+- **Cancel = batch-boundary, not mid-batch.** Mid-batch cancel would need cancelling the fetch to HubSpot, and HubSpot may still process the write server-side, so mid-batch cancel would leave the job in a weird partial state. Batch-boundary keeps the invariant that every issued batch either fully succeeds or fully fails
+- **Cancel returns 499 (client-closed-request).** Non-standard but widely understood (nginx conv). Client that aborted the fetch won't see this response — the value is that the job row is marked `cancelled` so `/jobs` shows the story after the fact
+- **`targetTableId` is a hint, not a lookup key.** Server routes still resolve `mapping.targetTableName` → portal `HubdbTable.id` via `fetchPortalSchema`. Caching the id doesn't skip the fetch (we also need column types for synthesis), but it survives a target rename and gives future features a stable pointer
+
+**Still open on `phases/phase-1-mvp.md`** (polish + robustness intentionally deferred):
+- F3: write provisioned table IDs back into mapping profile (now easier — `MappingState.targetTableId` exists; provision UI just needs to write it back for the row it just created)
+- F8: per-batch cursor persistence, worker-runner separation, bounded slice + re-enqueue (Phase-2 runner rework in `docs/long-job-runner.md`)
+- SSE progress: `GET /api/jobs/[id]/stream` + UI subscriber
+
+**Next up (unblocked):**
+- Phase 2 — mapping profile export/import JSON, resume from failure (Inngest), schema inference, XLSX + Google Sheets sources
+- Manual Vercel deploy — `DEPLOYMENT.md`
+- Provision-writes-back-tableId — the small remaining F3 polish
+
+---
+
+## Prior state — 2026-09-23 (morning)
+
+**Server-side hardening pass landed.** Three synth/plan-time gates now stop doomed batches before they hit HubSpot:
+1. **Cell-length caps** — `synthesizeExecution` rejects mapped rows whose source cell exceeds the target's ceiling (RICHTEXT: 65k, everything else: 10k). New `cell-too-long` issue kind carries `{source, sourceColumn, targetColumn, targetType, maxLength, count, sampleRowIndex, sampleLength}`
+2. **hs_path validation** — when a mapping sets `hsPath`, synth calls `validatePathColumn` server-side. New `page-path-invalid` issue kind echoes the full `PathValidationIssue[]` list (`not-lowercase` / `invalid-char` / `duplicate` / `empty`)
+3. **Dry-run signature gate** — new `computeExecutionSignature(sources, mappings)` (canonical-JSON SHA-256) returned by the dry-run endpoint. Execute now requires `dryRunSignature` in the body and 400s if the client-supplied hash doesn't match the server-recomputed one. Any edit to sources or mappings clears the client-side sig; `ExecutePanel`'s button is disabled without one
+
+**Wiring:** `lib/execution.ts` gains both preflight blocks + the signature helper; `POST /api/portals/[id]/dry-run` returns `signature` (headers stripped before hashing since execute doesn't send them); `POST /api/portals/[id]/execute` requires `dryRunSignature` in the body zod schema; `DryRunPanel` fires an `onComplete(signature)` callback; `source-uploader` holds sig state and invalidates it on every mapping edit / profile load / new source parse; `ExecutePanel` passes sig in body and disables Execute when null. 188 vitest cases / 14 suites (+6 new: 2 cell-length, 2 hs_path, 2 signature). tsc + lint clean
+
+**Still open on `phases/phase-1-mvp.md`** (polish + robustness intentionally deferred):
+- F3: write provisioned table IDs back into mapping profile
+- F8: cancel button, per-batch cursor persistence, worker-runner separation, bounded slice + re-enqueue (Phase-2 runner rework in `docs/long-job-runner.md`)
+- FK correctness: stale-ID re-resolve on write error
+- SSE progress: `GET /api/jobs/[id]/stream` + UI subscriber
+
+**Next up (unblocked):**
+- Sandbox smoke test — one turn against `/import` with an oversized cell + a bad hs_path to see the 400 responses render in `ExecutePanel`
+- Mid-size polish — stale-ID retry (re-resolve FK once on write error), cancel button (UI abort at batch boundary), cache resolved table IDs in mapping profile
+- Phase 2 — `phases/phase-2.md`: mapping profile export/import JSON, resume from failure (Inngest), schema inference, XLSX + Google Sheets sources
+- Deploy — `DEPLOYMENT.md`; manual Vercel step still pending
+
+---
+
+## Prior state — 2026-09-18
 
 **Phase:** 1 — MVP **usable end-to-end**. Core happy path shipped: F1 (portal connection) → F2 (source ingestion) → F3 (introspection + provisioning) → F4 (column mapping) → F5 (foreign-relationship config) → F6 (dependency ordering) → F7 (dry run) → F8 (execute + publish) → F10 (results & logging + downloads) → F11 (mapping profiles + job history). All four `onMissing` FK policies (skip-row / null / fail / create-stub) wired and sandbox-verified via `spike/14`. Composite NK + multi-value FK working. Node 22 upgrade complete. Delete-table endpoint shipped. Both Phase-0 open questions closed (rate-limit stress: no 429s at 100 concurrent — reactive retry sufficient; long-job runner: `docs/long-job-runner.md` recommends Inngest for Phase 2). Deployment scaffolding ready (`vercel.json` + `DEPLOYMENT.md`).
 

@@ -105,6 +105,11 @@ export interface ForeignKeyConfig {
 
 export interface MappingState {
   targetTableName: string | null;
+  // Portal id of the resolved target. Cached at target-picker time so a
+  // saved profile carries a stable pointer even if the display name later
+  // shifts on the portal. Server routes still resolve by name (id is an
+  // optimization / provenance hint), so a null here is not fatal.
+  targetTableId?: string | null;
   columnMap: ColumnMap;
   naturalKey: string[];
   hsName: string | null;
@@ -115,6 +120,7 @@ export interface MappingState {
 export function initialMappingState(): MappingState {
   return {
     targetTableName: null,
+    targetTableId: null,
     columnMap: {},
     naturalKey: [],
     hsName: null,

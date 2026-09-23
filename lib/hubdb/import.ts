@@ -11,7 +11,7 @@ import {
   type NormalizeOptions,
 } from "../resolve";
 import type { Schema, SchemaTable } from "../schema";
-import type { HubdbClient } from "./client";
+import { HubdbError, type HubdbClient } from "./client";
 import {
   batchCreateDraftRows,
   batchUpdateDraftRows,
@@ -77,6 +77,8 @@ export type ImportInput = {
 export type ImportOptions = {
   normalize?: NormalizeOptions;
   onEvent?: (event: ImportEvent) => void;
+  /** Aborted between batches — the current in-flight batch always completes. */
+  signal?: AbortSignal;
 };
 
 export type ImportEvent =
@@ -84,6 +86,7 @@ export type ImportEvent =
   | { kind: "table-preflight-ok"; table: string; existingRows: number; sourceCount: number }
   | { kind: "batch-create"; table: string; batch: number; sent: number }
   | { kind: "batch-update"; table: string; batch: number; sent: number }
+  | { kind: "stale-fk-retry"; table: string; batchKind: "create" | "update"; refreshed: string[] }
   | { kind: "table-done"; table: string; created: number; updated: number; skipped: number };
 
 export type RowErrorKind =
@@ -159,10 +162,56 @@ class _FailFastSignal extends Error {
   }
 }
 
+/**
+ * Raised when the caller aborted the AbortSignal on ImportOptions.
+ * Carries a `partial` ImportResult so the UI/job log can render whatever
+ * completed before the cancel took effect.
+ */
+export class ImportCancelledError extends Error {
+  readonly partial: ImportResult;
+  constructor(partial: ImportResult) {
+    super("Import cancelled by caller");
+    this.name = "ImportCancelledError";
+    this.partial = partial;
+  }
+}
+
+class _CancelSignal extends Error {
+  readonly tableResult: TableImportResult;
+  constructor(tableResult: TableImportResult) {
+    super("cancelled");
+    this.name = "_CancelSignal";
+    this.tableResult = tableResult;
+  }
+}
+
 function chunk<T>(arr: readonly T[], size: number): T[][] {
   const out: T[][] = [];
   for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
   return out;
+}
+
+/**
+ * Heuristic for "this batch failed because an FK id we resolved earlier
+ * was already stale by the time HubDB saw the write." We don't have a
+ * definitive HubSpot error code for this; we match on 4xx + a body hint.
+ * False positives just cost one extra list-per-foreign-table refetch, so
+ * a broad matcher is fine.
+ */
+function isPossiblyStaleFkError(err: unknown): boolean {
+  if (!(err instanceof HubdbError)) return false;
+  if (err.status !== 400 && err.status !== 404) return false;
+  const s =
+    typeof err.responseBody === "string"
+      ? err.responseBody
+      : JSON.stringify(err.responseBody ?? "");
+  const lc = s.toLowerCase();
+  return (
+    lc.includes("foreign") ||
+    lc.includes("no such row") ||
+    lc.includes("does not exist") ||
+    lc.includes("not found")
+  );
 }
 
 function naturalKeyColumns(t: SchemaTable): string[] {
@@ -345,6 +394,7 @@ async function importOneTable(
   keyMapsByTable: Map<string, Map<string, string>>,
   fkOptionsForTable: Readonly<Record<string, FkColumnOption>> | undefined,
   tableIdsMap: Readonly<Record<string, string>>,
+  schemaByName: ReadonlyMap<string, SchemaTable>,
   opts: ImportOptions,
 ): Promise<TableImportResult> {
   const normOpts = opts.normalize ?? DEFAULT_NORMALIZE;
@@ -356,8 +406,12 @@ async function importOneTable(
     skipped: 0,
     errors: [],
   };
+  const checkCancel = () => {
+    if (opts.signal?.aborted) throw new _CancelSignal(result);
+  };
 
   emit({ kind: "table-start", table: table.name, sourceCount: source.length });
+  checkCancel();
 
   const nkCols = naturalKeyColumns(table);
   const hasNk = nkCols.length > 0;
@@ -512,33 +566,131 @@ async function importOneTable(
     }
   }
 
+  // Refresh every foreign table's key map by re-listing draft rows and
+  // rebuilding the natural-key → id maps in place. Returns the list of
+  // foreign table names that were actually refreshed (skips columns whose
+  // foreign target has no naturalKey or no portal id).
+  async function refreshForeignKeyMaps(): Promise<string[]> {
+    const refreshed: string[] = [];
+    const seen = new Set<string>();
+    for (const c of table.columns) {
+      if (c.type !== "FOREIGN_ID" || !c.foreignTable || seen.has(c.foreignTable)) continue;
+      seen.add(c.foreignTable);
+      const foreignId = tableIdsMap[c.foreignTable];
+      const foreignTable = schemaByName.get(c.foreignTable);
+      if (!foreignId || !foreignTable) continue;
+      const fnk = naturalKeyColumns(foreignTable);
+      if (fnk.length === 0) continue;
+      const rows = await ops.listAllDraftRows(foreignId);
+      const built = buildKeyMap(rows, fnk, normOpts);
+      if (built.ok) {
+        keyMapsByTable.set(c.foreignTable, built.map);
+        refreshed.push(c.foreignTable);
+      }
+    }
+    return refreshed;
+  }
+
   const updateBatches = chunk(updates, HUBDB_MAX_BATCH_SIZE);
   for (let i = 0; i < updateBatches.length; i++) {
+    checkCancel();
     const batch = updateBatches[i];
     emit({ kind: "batch-update", table: table.name, batch: i + 1, sent: batch.length });
     const inputs: HubdbRowUpdate[] = batch.map((p) => {
       if (p.kind !== "update") throw new Error("unreachable");
       return { id: p.rowId, values: p.values };
     });
-    const patched = await ops.batchUpdateDraftRows(tableRef, inputs);
-    result.updated += patched.length;
+    try {
+      const patched = await ops.batchUpdateDraftRows(tableRef, inputs);
+      result.updated += patched.length;
+    } catch (err) {
+      if (!isPossiblyStaleFkError(err)) throw err;
+      const refreshed = await refreshForeignKeyMaps();
+      if (refreshed.length === 0) throw err;
+      emit({ kind: "stale-fk-retry", table: table.name, batchKind: "update", refreshed });
+      // Re-plan surviving rows; drop new errors into the result.
+      const retryInputs: HubdbRowUpdate[] = [];
+      for (const p of batch) {
+        if (p.kind !== "update") continue;
+        const planned = planRow(
+          table,
+          source[p.sourceIndex],
+          p.sourceIndex,
+          existingKeyMap,
+          readonlyKeyMaps,
+          fkOptionsForTable,
+          normOpts,
+          null,
+        );
+        if (planned.kind === "update") retryInputs.push({ id: planned.rowId, values: planned.values });
+        else if (planned.kind === "insert") retryInputs.push({ id: p.rowId, values: planned.values });
+        else if (planned.kind === "error") {
+          result.errors.push(planned.error);
+          result.skipped++;
+        }
+      }
+      if (retryInputs.length > 0) {
+        const patched = await ops.batchUpdateDraftRows(tableRef, retryInputs);
+        result.updated += patched.length;
+      }
+    }
   }
 
   const insertBatches = chunk(inserts, HUBDB_MAX_BATCH_SIZE);
   for (let i = 0; i < insertBatches.length; i++) {
+    checkCancel();
     const batch = insertBatches[i];
     emit({ kind: "batch-create", table: table.name, batch: i + 1, sent: batch.length });
     const inputs: HubdbRowInput[] = batch.map((p) => {
       if (p.kind !== "insert") throw new Error("unreachable");
       return { values: p.values };
     });
-    const created = await ops.batchCreateDraftRows(tableRef, inputs);
+    // Parallel arrays: retryInputs[j] came from source row retrySourceIdxs[j].
+    // Used for both the initial call (identity mapping) and the retry.
+    let effectiveSourceIdxs = batch.map((p) => p.sourceIndex);
+    let created: HubdbRow[];
+    try {
+      created = await ops.batchCreateDraftRows(tableRef, inputs);
+    } catch (err) {
+      if (!isPossiblyStaleFkError(err)) throw err;
+      const refreshed = await refreshForeignKeyMaps();
+      if (refreshed.length === 0) throw err;
+      emit({ kind: "stale-fk-retry", table: table.name, batchKind: "create", refreshed });
+      const retryInputs: HubdbRowInput[] = [];
+      const retrySourceIdxs: number[] = [];
+      for (const p of batch) {
+        if (p.kind !== "insert") continue;
+        const planned = planRow(
+          table,
+          source[p.sourceIndex],
+          p.sourceIndex,
+          existingKeyMap,
+          readonlyKeyMaps,
+          fkOptionsForTable,
+          normOpts,
+          null,
+        );
+        if (planned.kind === "insert") {
+          retryInputs.push({ values: planned.values });
+          retrySourceIdxs.push(p.sourceIndex);
+        } else if (planned.kind === "error") {
+          result.errors.push(planned.error);
+          result.skipped++;
+        }
+      }
+      if (retryInputs.length === 0) {
+        created = [];
+      } else {
+        created = await ops.batchCreateDraftRows(tableRef, retryInputs);
+        effectiveSourceIdxs = retrySourceIdxs;
+      }
+    }
     result.created += created.length;
     if (hasNk) {
       for (let j = 0; j < created.length; j++) {
-        const src = batch[j];
-        if (src.kind !== "insert") continue;
-        const key = composeCompositeKey(source[src.sourceIndex], nkCols, normOpts);
+        const srcIdx = effectiveSourceIdxs[j];
+        if (srcIdx === undefined) continue;
+        const key = composeCompositeKey(source[srcIdx], nkCols, normOpts);
         if (key) existingKeyMap.set(key, created[j].id);
       }
     }
@@ -607,6 +759,7 @@ export async function importRows(
           keyMapsByTable,
           fkOptionsForTable,
           input.tableIds,
+          schemaByName,
           opts,
         ),
       );
@@ -627,6 +780,21 @@ export async function importRows(
           });
         }
         throw new ImportFailFastError(err.row, { order, tables, ok: false });
+      }
+      if (err instanceof _CancelSignal) {
+        tables.push(err.tableResult);
+        const remaining = order.slice(order.indexOf(name) + 1);
+        for (const r of remaining) {
+          const rSource = input.source[r] ?? [];
+          tables.push({
+            name: r,
+            created: 0,
+            updated: 0,
+            skipped: rSource.length,
+            errors: [],
+          });
+        }
+        throw new ImportCancelledError({ order, tables, ok: false });
       }
       throw err;
     }

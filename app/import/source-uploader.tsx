@@ -52,6 +52,9 @@ export function SourceUploader({ portals }: { portals: PortalSummary[] }) {
   const [portalSchemaError, setPortalSchemaError] = useState<string | null>(null);
   const [mappings, setMappings] = useState<Record<string, MappingState>>({});
   const [selectedProfileId, setSelectedProfileId] = useState<string | null>(null);
+  // Cleared whenever sources/mappings change (either edit or profile load)
+  // so ExecutePanel can gate on a fresh dry run.
+  const [dryRunSignature, setDryRunSignature] = useState<string | null>(null);
 
   useEffect(() => {
     if (!portalId) return;
@@ -89,11 +92,13 @@ export function SourceUploader({ portals }: { portals: PortalSummary[] }) {
 
   function updateMapping(sourceName: string, next: MappingState) {
     setMappings((prev) => ({ ...prev, [sourceName]: next }));
+    setDryRunSignature(null);
   }
 
   function loadProfile(next: Record<string, MappingState>, profileId: string) {
     setMappings(next);
     setSelectedProfileId(profileId);
+    setDryRunSignature(null);
   }
 
   const currentSourceNames =
@@ -111,6 +116,7 @@ export function SourceUploader({ portals }: { portals: PortalSummary[] }) {
         return;
       }
       setState({ kind: "success", response: payload });
+      setDryRunSignature(null);
     } catch (err) {
       setState({ kind: "error", message: (err as Error).message });
     }
@@ -137,6 +143,7 @@ export function SourceUploader({ portals }: { portals: PortalSummary[] }) {
         return;
       }
       setState({ kind: "success", response: body });
+      setDryRunSignature(null);
     } catch (err) {
       setState({ kind: "error", message: (err as Error).message });
     }
@@ -287,6 +294,8 @@ export function SourceUploader({ portals }: { portals: PortalSummary[] }) {
           mappings={mappings}
           onMappingChange={updateMapping}
           profileId={selectedProfileId}
+          dryRunSignature={dryRunSignature}
+          onDryRunComplete={setDryRunSignature}
         />
       ) : null}
     </div>
@@ -374,6 +383,8 @@ function Results({
   mappings,
   onMappingChange,
   profileId,
+  dryRunSignature,
+  onDryRunComplete,
 }: {
   response: ParseResponse;
   portalId: string;
@@ -383,6 +394,8 @@ function Results({
   mappings: Record<string, MappingState>;
   onMappingChange: (source: string, next: MappingState) => void;
   profileId: string | null;
+  dryRunSignature: string | null;
+  onDryRunComplete: (signature: string) => void;
 }) {
   return (
     <section className="space-y-6">
@@ -420,7 +433,12 @@ function Results({
           <>
             {showOrderPanel ? <ImportOrderPanel plan={orderPlan} /> : null}
             {showDryRun ? (
-              <DryRunPanel portalId={portalId} sources={allSources} mappings={mappings} />
+              <DryRunPanel
+                portalId={portalId}
+                sources={allSources}
+                mappings={mappings}
+                onComplete={onDryRunComplete}
+              />
             ) : null}
             {showDryRun ? (
               <ExecutePanel
@@ -428,8 +446,9 @@ function Results({
                 sources={allSources}
                 mappings={mappings}
                 profileId={profileId}
+                dryRunSignature={dryRunSignature}
                 disabled={false}
-                disabledReason="Run a dry run first to preview what will happen — the API endpoint will still refuse execution if the synthesized mapping isn't valid."
+                disabledReason="Run a dry run first — execute is gated on a matching dry-run signature."
               />
             ) : null}
             {response.tables.map((t) => {
