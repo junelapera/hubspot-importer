@@ -1,0 +1,431 @@
+import Link from "next/link";
+import { DocsToc } from "./docs-toc";
+
+export const metadata = {
+  title: "Docs · S2 HubDB Importer",
+};
+
+const EXAMPLES = [
+  {
+    href: "/examples/brands.csv",
+    name: "brands.csv",
+    size: "4 rows",
+    desc: "Foreign table — natural key is slug (acme, globex, initech, umbrella).",
+  },
+  {
+    href: "/examples/categories.csv",
+    name: "categories.csv",
+    size: "4 rows",
+    desc: "Foreign table — natural key is slug (kitchen, outdoors, office, tools).",
+  },
+  {
+    href: "/examples/products.csv",
+    name: "products.csv",
+    size: "8 rows",
+    desc: "Main table — natural key is sku. brand + category columns reference the two tables above by slug.",
+  },
+  {
+    href: "/examples/schema.json",
+    name: "schema.json",
+    size: "3 tables",
+    desc: "Schema definition for the F3 provisioning step — creates the three tables above with the right column types + FK links.",
+  },
+];
+
+export default function DocsPage() {
+  return (
+    <main className="mx-auto max-w-6xl px-6 py-12 lg:grid lg:grid-cols-[minmax(0,1fr)_200px] lg:gap-10">
+      <div className="space-y-10">
+        <header className="space-y-3">
+          <p className="text-xs uppercase tracking-wider text-muted-foreground">Guide</p>
+          <h1 className="text-3xl font-semibold">How to use S2 HubDB Importer</h1>
+          <p className="text-base leading-relaxed text-muted-foreground">
+            A step-by-step walkthrough for importing relational data (a main
+            table plus its foreign lookups) into a HubSpot HubDB portal, with a
+            downloadable example dataset you can run end-to-end against a
+            sandbox portal in a few minutes.
+          </p>
+        </header>
+
+        <DocsToc variant="inline" />
+
+      <Section id="overview" title="What this app does">
+        <p>
+          HubSpot&apos;s native HubDB CSV importer <em>cannot</em> populate{" "}
+          <Code>FOREIGN_ID</Code> columns — foreign relationships have to be
+          linked one row at a time in the UI. This app takes CSV or JSON source
+          files, resolves foreign keys from human-readable natural keys (SKU,
+          slug, name), and writes rows in dependency order so{" "}
+          <Code>FOREIGN_ID</Code> cells land with real HubDB row IDs on the
+          first pass.
+        </p>
+        <p>
+          Two ideas do most of the work:{" "}
+          <strong>two-pass import</strong> (foreign tables written first to
+          obtain row IDs, then the main table with substituted IDs) and{" "}
+          <strong>name-based FK references</strong> (schema definitions point
+          at other tables by name, so files stay portable across portals).
+        </p>
+      </Section>
+
+      <Section id="example-dataset" title="Example dataset — download to test">
+        <p>
+          The files below model a small product catalog:{" "}
+          <Code>products</Code> references <Code>brands</Code> and{" "}
+          <Code>categories</Code> by slug. Drop them into the wizard to
+          exercise the full loop.
+        </p>
+        <ul className="space-y-2">
+          {EXAMPLES.map((f) => (
+            <li
+              key={f.href}
+              className="flex flex-col gap-1 rounded-md border border-border bg-card p-3 sm:flex-row sm:items-baseline sm:gap-3"
+            >
+              <a
+                href={f.href}
+                download
+                className="text-sm font-semibold text-primary underline-offset-2 hover:underline"
+              >
+                {f.name}
+              </a>
+              <span className="text-xs text-muted-foreground">{f.size}</span>
+              <span className="text-xs text-muted-foreground sm:flex-1">
+                {f.desc}
+              </span>
+            </li>
+          ))}
+        </ul>
+        <p className="text-xs text-muted-foreground">
+          All four files are served statically from{" "}
+          <Code>public/examples/</Code> in this repo.
+        </p>
+      </Section>
+
+      <Section id="prerequisites" title="Prerequisites">
+        <ul className="list-disc space-y-1 pl-5">
+          <li>
+            A HubSpot portal (sandbox strongly recommended for first-time
+            runs) with a private-app token that has the <Code>hubdb</Code>{" "}
+            read + write scopes. Create one under{" "}
+            <em>Settings → Integrations → Private Apps</em>.
+          </li>
+          <li>
+            The app running locally or on Vercel with Supabase configured (see{" "}
+            <ExternalLink href="https://github.com/junelapera/hubspot-importer/blob/main/DEPLOYMENT.md">
+              DEPLOYMENT.md
+            </ExternalLink>{" "}
+            for env vars).
+          </li>
+          <li>Node 22+ (supabase-js needs the native WebSocket global).</li>
+        </ul>
+      </Section>
+
+      <Section id="walkthrough" title="Walkthrough">
+        <Step
+          n={1}
+          title="Connect the portal"
+          route="/portals"
+          body={
+            <>
+              Open <NavLink href="/portals">Portals</NavLink>. Click{" "}
+              <em>Add portal</em>, give it a label, pick{" "}
+              <Code>sandbox</Code> or <Code>production</Code> (production gets
+              a red badge as a safety cue), and paste the private-app token.
+              The token is validated against HubSpot before it&apos;s stored
+              encrypted at rest.
+            </>
+          }
+        />
+        <Step
+          n={2}
+          title="Upload the source files"
+          route="/import"
+          body={
+            <>
+              Open <NavLink href="/import">Import</NavLink> and pick the
+              portal. On the <em>Source</em> tab, upload{" "}
+              <Code>brands.csv</Code>, <Code>categories.csv</Code>, and{" "}
+              <Code>products.csv</Code> (or paste JSON). Each file shows a
+              20-row preview + parse warnings. Delimiter, encoding, and header
+              row auto-detect — override in the toolbar if needed.
+            </>
+          }
+        />
+        <Step
+          n={3}
+          title="Provision the HubDB tables"
+          route="/portals/[id]/schema"
+          body={
+            <>
+              From the portal detail page, paste{" "}
+              <Code>schema.json</Code> into the schema planner. The diff view
+              shows each table as <Code>create / match / update / conflict</Code>{" "}
+              — click <em>Provision</em>. Tables are created draft-only in
+              topological order (foreign tables first). If a table already
+              exists with a conflicting column type, the diff stops and
+              reports the conflict rather than silently retyping.
+            </>
+          }
+        />
+        <Step
+          n={4}
+          title="Map source columns to target columns"
+          route="/import"
+          body={
+            <>
+              Back in the wizard, each source table gets a mapping panel.
+              Auto-match handles obvious cases; use the per-row dropdown to
+              re-map or ignore columns. Type mismatches (a text SKU into a
+              NUMBER column, etc.) surface as inline badges. Tick a natural
+              key so the importer can upsert on re-runs — for the example set
+              that&apos;s <Code>slug</Code> on brands + categories and{" "}
+              <Code>sku</Code> on products.
+            </>
+          }
+        />
+        <Step
+          n={5}
+          title="Configure foreign relationships"
+          route="/import"
+          body={
+            <>
+              For every source column mapped to a <Code>FOREIGN_ID</Code>{" "}
+              target, a <em>Foreign key</em> panel appears. Pick the sibling
+              source table (e.g. <Code>brands</Code>) and the match key on it
+              (<Code>slug</Code>). Toggle multi-value if a cell contains
+              several delimited references (e.g.{" "}
+              <Code>&quot;acme,globex&quot;</Code>). Pick an{" "}
+              <em>onMissing</em> policy: <Code>skip-row</Code>,{" "}
+              <Code>null</Code>, <Code>fail</Code>, or <Code>create-stub</Code>{" "}
+              (auto-inserts a placeholder row in the foreign table). Live
+              counts show matched / unmatched / empty as you edit.
+            </>
+          }
+        />
+        <Step
+          n={6}
+          title="Dry run"
+          route="/import"
+          body={
+            <>
+              The <em>Dry run</em> panel reports rows to create / update,
+              unresolved FKs (with source row + column + value), coercion
+              warnings, and the projected HubSpot API call count. No writes
+              happen. Download the unresolved-refs CSV if you need to clean up
+              source data before executing. The dry run also produces a
+              signature — <em>Execute</em> stays disabled until the signature
+              matches, so you can&apos;t accidentally execute against edited
+              mappings.
+            </>
+          }
+        />
+        <Step
+          n={7}
+          title="Execute + publish"
+          route="/import"
+          body={
+            <>
+              Pick a publish mode: <Code>none</Code> (leave everything draft),{" "}
+              <Code>foreign-only</Code> (publish just the lookup tables), or{" "}
+              <Code>all</Code>. Click <em>Execute</em>. Per-table cards show
+              created / updated / skipped counts as batches complete. Cancel
+              at any batch boundary via the red <em>Cancel</em> button — the
+              in-flight batch always finishes so no rows are left half-written.
+              A stale-FK retry runs once automatically if a foreign row was
+              inserted mid-flight but not yet visible on the write.
+            </>
+          }
+        />
+        <Step
+          n={8}
+          title="Review + save the mapping profile"
+          route="/jobs"
+          body={
+            <>
+              Every run persists to <NavLink href="/jobs">Jobs</NavLink> with
+              per-table totals and a row-error log (CSV + JSON download).
+              Save the mapping as a named profile from the wizard&apos;s{" "}
+              <em>Mapping profile</em> panel so future runs (with fresh source
+              files) load in one click. Profiles can also be duplicated,
+              exported to JSON, or imported from someone else&apos;s export —
+              collisions auto-rename to <Code>Copy of X</Code>.
+            </>
+          }
+        />
+      </Section>
+
+      <Section id="reference" title="Reference">
+        <Subsection title="Foreign-key resolution">
+          <p>
+            Match keys are normalized before lookup: trim → collapse
+            whitespace → casefold, so <Code>&quot;Acme&nbsp;&nbsp;Corp&quot;</Code>{" "}
+            and <Code>&quot;acme corp&quot;</Code> resolve to the same row.
+            Use <em>strict</em> matching if you need byte-exact comparison.
+            Multi-value cells are split on <Code>, | ; \n</Code> (pick one)
+            and deduped per cell.
+          </p>
+        </Subsection>
+        <Subsection title="onMissing policies">
+          <ul className="list-disc space-y-1 pl-5">
+            <li>
+              <Code>skip-row</Code> — drop the row from the batch, log the
+              unresolved value, continue with the rest.
+            </li>
+            <li>
+              <Code>null</Code> — write the row without the FK cell (empty
+              array, not null).
+            </li>
+            <li>
+              <Code>fail</Code> — abort the whole run at the first
+              unresolvable row. Partial results still persist so you can see
+              exactly how far it got.
+            </li>
+            <li>
+              <Code>create-stub</Code> — insert a placeholder row in the
+              foreign table using the unresolved token as its natural key,
+              then link the main row. Deduped by normalized key so{" "}
+              <Code>&quot;NEW-BRAND&quot;</Code> and{" "}
+              <Code>&quot;new-brand&quot;</Code> produce one stub.
+            </li>
+          </ul>
+        </Subsection>
+        <Subsection title="Constraints enforced client + server">
+          <ul className="list-disc space-y-1 pl-5">
+            <li>10,000 rows / table (HubDB limit)</li>
+            <li>10,000 chars / TEXT cell · 65,000 chars / RICHTEXT cell</li>
+            <li>Dynamic page paths must be lowercase</li>
+            <li>Batch mutations capped at 100 rows / call</li>
+            <li>429 / 5xx retried with exponential backoff + Retry-After</li>
+          </ul>
+        </Subsection>
+      </Section>
+
+      <Section id="troubleshooting" title="Troubleshooting">
+        <ul className="list-disc space-y-2 pl-5">
+          <li>
+            <strong>&quot;Node.js detected but native WebSocket not found&quot;</strong>{" "}
+            — you&apos;re on Node 20 or older. Upgrade to Node 22+
+            (<Code>nvm use 22</Code>) and restart the dev server.
+          </li>
+          <li>
+            <strong>409 on portal save</strong> — a portal with that label
+            already exists in that environment. Rename or delete the old one.
+          </li>
+          <li>
+            <strong>Execute button stays disabled</strong> — the dry run
+            signature doesn&apos;t match. Re-run the dry run panel; any
+            mapping edit invalidates the signature.
+          </li>
+          <li>
+            <strong>Foreign rows created but not linked</strong> — check the
+            row-error log at <NavLink href="/jobs">/jobs</NavLink>. Typically
+            an <Code>onMissing: skip-row</Code> policy caught a typo in a
+            main-table cell; download the CSV and fix the source.
+          </li>
+        </ul>
+      </Section>
+
+        <footer className="border-t border-border pt-6 text-xs text-muted-foreground">
+          See{" "}
+          <ExternalLink href="https://github.com/junelapera/hubspot-importer/blob/main/hubdb-importer-prd.md">
+            the PRD
+          </ExternalLink>{" "}
+          for full product spec, or{" "}
+          <ExternalLink href="https://github.com/junelapera/hubspot-importer/blob/main/STATUS.md">
+            STATUS.md
+          </ExternalLink>{" "}
+          for the running project log.
+        </footer>
+      </div>
+
+      <DocsToc variant="sidebar" />
+    </main>
+  );
+}
+
+function Section({
+  id,
+  title,
+  children,
+}: {
+  id: string;
+  title: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <section id={id} className="space-y-3 scroll-mt-20">
+      <h2 className="text-xl font-semibold">{title}</h2>
+      <div className="space-y-3 text-sm leading-relaxed text-foreground/90">
+        {children}
+      </div>
+    </section>
+  );
+}
+
+function Subsection({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <div className="space-y-2">
+      <h3 className="text-sm font-semibold">{title}</h3>
+      {children}
+    </div>
+  );
+}
+
+function Step({
+  n,
+  title,
+  route,
+  body,
+}: {
+  n: number;
+  title: string;
+  route?: string;
+  body: React.ReactNode;
+}) {
+  return (
+    <div className="flex gap-3">
+      <div
+        aria-hidden
+        className="flex size-7 shrink-0 items-center justify-center rounded-full bg-primary text-xs font-semibold text-primary-foreground"
+      >
+        {n}
+      </div>
+      <div className="space-y-1 pb-2">
+        <div className="flex flex-wrap items-baseline gap-2">
+          <h3 className="text-sm font-semibold">{title}</h3>
+          {route ? <Code>{route}</Code> : null}
+        </div>
+        <p className="text-sm leading-relaxed text-foreground/90">{body}</p>
+      </div>
+    </div>
+  );
+}
+
+function Code({ children }: { children: React.ReactNode }) {
+  return (
+    <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-xs">
+      {children}
+    </code>
+  );
+}
+
+function NavLink({ href, children }: { href: string; children: React.ReactNode }) {
+  return (
+    <Link href={href} className="text-primary underline-offset-2 hover:underline">
+      {children}
+    </Link>
+  );
+}
+
+function ExternalLink({ href, children }: { href: string; children: React.ReactNode }) {
+  return (
+    <a
+      href={href}
+      target="_blank"
+      rel="noreferrer"
+      className="text-primary underline-offset-2 hover:underline"
+    >
+      {children}
+    </a>
+  );
+}

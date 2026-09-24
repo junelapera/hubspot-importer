@@ -1,0 +1,50 @@
+{
+  "version": 1,
+  "tables": [
+    {
+      "name": "brands",
+      "label": "Brands (example)",
+      "naturalKey": "slug",
+      "columns": [
+        { "name": "slug", "label": "Slug", "type": "TEXT" },
+        { "name": "name", "label": "Name", "type": "TEXT" },
+        { "name": "website", "label": "Website", "type": "URL" }
+      ]
+    },
+    {
+      "name": "categories",
+      "label": "Categories (example)",
+      "naturalKey": "slug",
+      "columns": [
+        { "name": "slug", "label": "Slug", "type": "TEXT" },
+        { "name": "name", "label": "Name", "type": "TEXT" },
+        { "name": "description", "label": "Description", "type": "TEXT" }
+      ]
+    },
+    {
+      "name": "products",
+      "label": "Products (example)",
+      "naturalKey": "sku",
+      "columns": [
+        { "name": "sku", "label": "SKU", "type": "TEXT" },
+        { "name": "name", "label": "Name", "type": "TEXT" },
+        {
+          "name": "brand",
+          "label": "Brand",
+          "type": "FOREIGN_ID",
+          "foreignTable": "brands",
+          "foreignColumn": "slug"
+        },
+        {
+          "name": "category",
+          "label": "Category",
+          "type": "FOREIGN_ID",
+          "foreignTable": "categories",
+          "foreignColumn": "slug"
+        },
+        { "name": "price", "label": "Price", "type": "NUMBER" },
+        { "name": "description", "label": "Description", "type": "RICHTEXT" }
+      ]
+    }
+  ]
+}

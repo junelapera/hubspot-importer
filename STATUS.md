@@ -2,7 +2,27 @@
 
 Running log of where the HubDB Importer project is, what's in flight, and what's next. Update as we go.
 
-## Current state — 2026-09-24 (afternoon)
+## Current state — 2026-09-24 (evening)
+
+**`/docs` guide + downloadable example dataset shipped.** New end-user-facing walkthrough page with a scroll-spy TOC, a fifth sidebar nav item, and a small relational dataset served from `public/examples/` so a new user can go from zero to a full sandbox run without touching any code.
+
+1. **`/docs` route** — `app/docs/page.tsx` (server component). Structured content across six sections: overview / example dataset / prerequisites / 8-step walkthrough / reference / troubleshooting. Every step calls out the route it targets (`/portals`, `/import`, `/jobs`) and inline-links back to the running app via `NavLink`. Reusable `Section` / `Subsection` / `Step` / `Code` / `NavLink` / `ExternalLink` helpers styled with the S2 palette
+2. **Example dataset** — `public/examples/{brands,categories,products}.csv` + `public/examples/schema.json`. Small product catalog (4 brands, 4 categories, 8 products) exercising both FK columns via slug natural keys and every column type in play (TEXT / URL / NUMBER / RICHTEXT / FOREIGN_ID). schema.json is a valid v1 schema definition ready to paste into F3 provisioning. All four files served statically; download links use `<a download>` for the correct filename
+3. **Inner navigation for the guide** — `app/docs/sections.ts` exports the single source of truth for section id + title; `app/docs/docs-toc.tsx` (client component) renders two variants of the TOC — a **sticky sidebar** on `lg` screens (right column of a two-col grid, left-border active highlight in primary color) and a **compact inline card** on smaller screens (pill-style flex-wrap links). Both share one `IntersectionObserver` under the hood with `rootMargin: "-20% 0px -70% 0px"` so the topmost section crossing ~20% down from the viewport becomes active
+4. **Sidebar nav item** — new "Docs" entry using `public/icons/team-building.svg` (Saltedstone S2 set; forest fill so the mask trick still works). Sidebar icons bumped from `size-4` (16px) to `size-5` (20px) at user request; mobile nav kept at `size-3.5` for the compressed strip. Home-page tile added for `/docs` so it's discoverable from `/` too
+5. **Global smooth-scroll** — `scroll-behavior: smooth` on `html` in `globals.css`; each `<Section>` gets `scroll-mt-20` so anchor jumps animate and land under the mobile sticky nav bar
+
+**Files touched / added:** `app/docs/page.tsx` (new), `app/docs/docs-toc.tsx` (new), `app/docs/sections.ts` (new), `app/nav.tsx` (Docs item + size bump), `app/page.tsx` (Docs tile), `app/globals.css` (smooth scroll), plus assets: `public/examples/{brands,categories,products}.csv`, `public/examples/schema.json`, `public/icons/team-building.svg`. 203 vitest cases still green (UI-only + static assets), tsc + lint clean
+
+**Design decisions worth remembering:**
+- **Single sections module, two TOC variants.** The `SECTIONS` const in `sections.ts` is the only place section ids + titles live — both the page (`Section id={...}`) and the TOC iterate over it. Adding a new section = one edit. Both TOC variants call the same `useActiveSection()` hook so the sticky sidebar + inline card stay in sync during scroll
+- **IntersectionObserver, not scroll listener.** Cheaper (browser-scheduled), zero throttle logic needed. Only downside is the "which one wins when several are simultaneously visible" tie-break — resolved by picking the intersecting section with the highest `top` (closest to viewport top), which matches the "you are here" intuition
+- **Grid layout instead of `float` or a `fixed` panel.** Two-column CSS grid with `minmax(0,1fr)_200px` keeps the sticky TOC in normal flow — no viewport-height math, no z-index games, and the TOC scrolls with the page footer if the content is shorter than the sidebar
+- **Example dataset chosen to be the smallest thing that exercises the full loop.** Two foreign tables + one main table with two FK cols means the toposort runs (not a single-node graph) and both FK columns need independent resolution. Slug natural keys chosen because they're the most common real-world identifier in CMS data — matches how a user is actually going to model their content
+
+---
+
+## Prior state — 2026-09-24 (afternoon)
 
 **Saltedstone brand pass — palette + typography + wordmark + icons.** No functional changes; UI-only reskin so the app looks like it belongs to S2 rather than default shadcn.
 

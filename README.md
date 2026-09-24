@@ -6,6 +6,7 @@ Self-hosted Next.js tool that imports relational data into HubSpot HubDB — res
 
 ## Docs
 
+- **In-app guide:** run the app and visit [`/docs`](http://localhost:3000/docs) for an end-user walkthrough + a downloadable example dataset (`public/examples/{brands,categories,products}.csv` + `schema.json`) that exercises the full loop against a sandbox portal
 - [`hubdb-importer-prd.md`](./hubdb-importer-prd.md) — source-of-truth PRD (v0.1)
 - [`phases/`](./phases) — per-phase task checklists (0 spike → 3 client-facing)
 - [`STATUS.md`](./STATUS.md) — running project log — start here

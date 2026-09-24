@@ -18,6 +18,7 @@ const ITEMS: NavItem[] = [
   { href: "/portals", label: "Portals", icon: "/icons/compensation.svg" },
   { href: "/import", label: "Import", icon: "/icons/hubspot-expertise.svg" },
   { href: "/jobs", label: "Jobs", icon: "/icons/custom-solutions.svg" },
+  { href: "/docs", label: "Docs", icon: "/icons/team-building.svg" },
 ];
 
 // CSS mask lets the flat-colored Saltedstone SVGs inherit `currentColor`
@@ -78,7 +79,7 @@ export function Sidebar() {
                 >
                   <span
                     aria-hidden
-                    className="size-4 bg-current shrink-0"
+                    className="size-5 bg-current shrink-0"
                     style={iconMaskStyle(item.icon)}
                   />
                   <span>{item.label}</span>

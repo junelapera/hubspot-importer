@@ -38,6 +38,12 @@ export default function Home() {
           desc="History of imports, dry runs, and publishes with per-table totals and row-error logs (F10 + F11)."
           ready
         />
+        <SectionLink
+          href="/docs"
+          title="Docs"
+          desc="Step-by-step walkthrough + downloadable example CSVs and schema.json for testing the full loop."
+          ready
+        />
       </nav>
 
       <footer className="border-t border-border pt-6 text-xs text-muted-foreground">
