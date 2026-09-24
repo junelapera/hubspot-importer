@@ -42,10 +42,10 @@ export function DocsToc({ variant = "sidebar" }: { variant?: Variant }) {
       aria-label="Guide sections"
       className="hidden lg:block sticky top-8 self-start"
     >
-      <p className="mb-2 text-[10px] uppercase tracking-wider text-muted-foreground">
+      <p className="mb-3 text-xs uppercase tracking-wider text-muted-foreground">
         On this page
       </p>
-      <ul className="space-y-1.5 text-xs">
+      <ul className="space-y-2 text-sm">
         {SECTIONS.map((s) => (
           <li key={s.id}>
             <a
