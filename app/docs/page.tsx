@@ -293,6 +293,24 @@ export default function DocsPage() {
             </>
           }
         />
+        <Step
+          n={9}
+          title="Resume if it fails"
+          route="/jobs/[id]"
+          body={
+            <>
+              Failed or cancelled runs get a <em>Resume</em> button on the
+              job detail page. Clicking it reopens the wizard with the
+              linked mapping profile pre-loaded and the target portal
+              pre-selected — you re-upload the same source files and click{" "}
+              <em>Execute</em>. The run continues on the existing job row,
+              and because the importer upserts by natural key, rows that
+              already landed in HubDB are re-classified as no-op updates.
+              Per-batch cursors + per-table key maps are written to
+              Supabase during every run for audit visibility.
+            </>
+          }
+        />
       </Section>
 
       <Section id="reference" title="Reference">
@@ -367,6 +385,30 @@ export default function DocsPage() {
               <Code>&quot;new-brand&quot;</Code> produce one stub.
             </li>
           </ul>
+        </Subsection>
+        <Subsection title="Resume from failure">
+          <p>
+            Every batch attempt writes a row to Supabase&apos;s{" "}
+            <Code>job_batches</Code> table (kind, status, sent-at, finished-at)
+            and every table&apos;s completed key map lands in{" "}
+            <Code>key_maps</Code>. When a run fails or is cancelled, the job
+            detail page shows a <em>Resume</em> button that deep-links back
+            into the wizard with the mapping profile and target portal
+            pre-selected. Re-upload the same source files, run the dry run,
+            and click <em>Execute</em> — the resume request threads the
+            original job id through so the audit trail continues on the
+            same row rather than creating a new one.
+          </p>
+          <p>
+            <strong>Why re-run is safe:</strong> the importer splits source
+            rows into insert / update batches by looking up their natural
+            key in the current HubDB state. Rows that succeeded before are
+            now visible in HubDB, so on resume they get re-classified as
+            no-op PATCH updates rather than duplicate inserts. Rows that
+            failed re-run naturally as fresh inserts. No explicit
+            skip-completed-batches logic — correctness falls out of the
+            upsert design.
+          </p>
         </Subsection>
         <Subsection title="Constraints enforced client + server">
           <ul className="list-disc space-y-1 pl-5">
