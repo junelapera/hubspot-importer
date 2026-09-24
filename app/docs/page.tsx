@@ -121,6 +121,15 @@ export default function DocsPage() {
       </Section>
 
       <Section id="walkthrough" title="Walkthrough">
+        <p className="rounded-md border border-primary/40 bg-[color-mix(in_oklch,var(--color-brand-butter),var(--card)_50%)] px-3 py-2 text-xs">
+          <strong>Not a developer?</strong> Every step below also has an
+          inline <em>&quot;New to this? Show me how&quot;</em> tutorial in
+          the app itself — click any source tab on{" "}
+          <NavLink href="/import">/import</NavLink> or the schema planner
+          on the portal detail page and expand the disclosure at the top
+          of the form. This walkthrough is the concise reference; the
+          inline tutorials are the step-by-step.
+        </p>
         <Step
           n={1}
           title="Connect the portal"
@@ -449,6 +458,43 @@ export default function DocsPage() {
             upsert design.
           </p>
         </Subsection>
+        <Subsection title="Cell type coercion">
+          <p>
+            Every source cell arrives as a string (CSV / XLSX / Google
+            Sheets all serialize that way). HubSpot&apos;s batch write API
+            is strict about JSON types on typed columns, so the importer
+            coerces each cell to the right JSON type before writing:
+          </p>
+          <ul className="list-disc space-y-1 pl-5">
+            <li>
+              <Code>NUMBER</Code> and <Code>CURRENCY</Code> — parsed with{" "}
+              <Code>Number()</Code>. Currency formatting is stripped first
+              (<Code>$</Code> <Code>€</Code> <Code>£</Code> <Code>¥</Code>,
+              commas, whitespace), so <Code>&quot;$1,299.00&quot;</Code>{" "}
+              becomes <Code>1299</Code>.
+            </li>
+            <li>
+              <Code>BOOLEAN</Code> — accepts{" "}
+              <Code>true/false/1/0/yes/no</Code> case-insensitively.
+            </li>
+            <li>
+              <Code>DATE</Code> and <Code>DATETIME</Code> — parsed via{" "}
+              <Code>Date.parse()</Code>, sent as epoch milliseconds.
+            </li>
+            <li>
+              <Code>TEXT</Code>, <Code>RICHTEXT</Code>, <Code>URL</Code>,{" "}
+              <Code>IMAGE</Code>, etc. — sent as-is; HubSpot parses these
+              server-side.
+            </li>
+          </ul>
+          <p>
+            Empty strings on non-text columns get dropped from the row
+            entirely (sending <Code>&quot;&quot;</Code> also 400s). Cells
+            that can&apos;t be parsed become <Code>type-mismatch</Code>{" "}
+            row errors — surfaced on the Execute result card — rather
+            than aborting the whole batch.
+          </p>
+        </Subsection>
         <Subsection title="Constraints enforced client + server">
           <ul className="list-disc space-y-1 pl-5">
             <li>10,000 rows / table (HubDB limit)</li>
@@ -481,6 +527,25 @@ export default function DocsPage() {
             row-error log at <NavLink href="/jobs">/jobs</NavLink>. Typically
             an <Code>onMissing: skip-row</Code> policy caught a typo in a
             main-table cell; download the CSV and fix the source.
+          </li>
+          <li>
+            <strong>Import fails with a 400 from HubSpot</strong> — expand
+            the <em>HubSpot response</em> block under the error message on
+            the Execute panel. It shows the exact rejection from HubSpot
+            (which cell / which column). Most common cause: a{" "}
+            <Code>NUMBER</Code> column whose source has non-numeric
+            characters we couldn&apos;t strip (e.g.{" "}
+            <Code>&quot;TBD&quot;</Code>, <Code>&quot;N/A&quot;</Code>) —
+            fix the source or promote the target column to <Code>TEXT</Code>.
+          </li>
+          <li>
+            <strong>FK panel looks configured but resolvability preview
+            doesn&apos;t show</strong> — reload <Code>/import</Code> and
+            reconfigure. Older saved profiles created before the Base UI
+            Select fix (2026-09-26) may have <Code>null</Code>{" "}
+            <Code>sourceTable</Code>/<Code>matchKey</Code> values that
+            display as selected but never committed to state. Re-save the
+            profile to overwrite.
           </li>
         </ul>
       </Section>
