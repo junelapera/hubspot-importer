@@ -181,7 +181,7 @@ function TableSection({
           type="text"
           value={table.label}
           onChange={(e) => onLabelChange(e.target.value)}
-          className="min-w-[10rem] flex-1 rounded-md border border-input bg-background px-2 py-1 text-sm"
+          className="h-9 min-w-[10rem] flex-1 rounded-md border border-input bg-background px-3 text-sm"
         />
         <span className="text-[11px] text-muted-foreground">
           natural key:{" "}

@@ -2,7 +2,25 @@
 
 Running log of where the HubDB Importer project is, what's in flight, and what's next. Update as we go.
 
-## Current state — 2026-09-25
+## Current state — 2026-09-25 (afternoon)
+
+**Form-control height alignment pass.** After the shadcn Select rollout every form control had slightly different metrics — buttons + selects were `h-7` (28px, from `size="sm"`), text inputs sat around 40px (ad-hoc `py-2 text-sm`), and `<input type="number">` was taller still because WebKit's spinner controls add invisible padding. All standardized on **h-9 (36px)** — a common form-control height that reads comfortably next to Hanken Grotesk body copy without feeling bulky.
+
+1. **`components/ui/button.tsx`** — bumped `default` + `sm` variants to `h-9 px-3` (were `h-8 px-2.5` / `h-7 px-2.5`), `lg` to `h-10 px-4`, icon-sm to `size-9`, icon-lg to `size-10`. `xs` / `icon-xs` stay at `h-6` for genuinely-tiny inline actions. Padding scaled proportionally so text doesn't crowd the border. Added a comment explaining the canonical form-control height so future edits don't drift back
+2. **`components/ui/select.tsx`** — both `default` and `sm` size variants set to `h-9`; left padding standardized to `pl-3` (was `pl-2.5`) to match Button. Trigger and Content share the same visual weight now, so open/closed states don't shift the popover origin
+3. **Text inputs (5 sites)** — swept the ad-hoc `py-2 text-sm` / `py-1.5` / `py-1` patterns and replaced with explicit `h-9 px-3` in `portal-form.tsx` (3 inputs incl. font-mono token), `source-uploader.tsx` (InputField helper), `profile-panel.tsx` (save-name), `schema-infer-panel.tsx` (label edit). Textareas (2 sites, `rows={8}` on the schema paste, `rows={10}` on the JSON paste) intentionally left alone — multi-row inputs shouldn't force a single-row height
+4. **`app/globals.css`** — new `@layer base` rule strips WebKit `::-webkit-inner/outer-spin-button` and sets Firefox `appearance: textfield` on `<input type="number">`. Without this, WebKit/Firefox render number inputs slightly taller and offset from regular text inputs even when both share the same `h-9 + px-3`. Global so any future number input inherits the fix — the "Header row" spinner in the CSV upload form was the visible tell
+
+**Files touched:** `components/ui/button.tsx`, `components/ui/select.tsx`, `app/globals.css`, `app/portals/portal-form.tsx`, `app/import/source-uploader.tsx`, `app/import/profile-panel.tsx`, `app/import/schema-infer-panel.tsx`. 224 vitest cases still green (UI-only), tsc + lint clean
+
+**Design decisions worth remembering:**
+- **h-9 (36px) is the canonical form-control height.** Chose this over h-8 (32px, feels a touch cramped with the 14px body) and h-10 (40px, starts to look chunky in dense wizard views). Buttons that want to be smaller use `xs` (h-6); everything else defaults to `sm`/`default` which are now both h-9. Buttons that want to be larger use `lg` (h-10)
+- **Padding hard-coded per-variant, not tokenized.** Considered introducing `--h-form` / `--px-form` CSS variables so the token lives in one place, but Tailwind arbitrary values (`h-[var(--h-form)]`) hurt tree-shaking and readability. Explicit `h-9 px-3` in the two shadcn primitives + comment covers the future-drift risk without the indirection
+- **Number-input spinner reset lives in globals.css, not per-usage.** WebKit's default spinner is invisible-padding-then-arrows, which throws every layout that mixes number + text inputs. Once-per-project reset in the base layer beats remembering to add `[&::-webkit-inner-spin-button]:appearance-none` to every `type="number"` site
+
+---
+
+## Prior state — 2026-09-25 (morning)
 
 **Two follow-on passes: shadcn Select rollout + docs cleanup on the F3 two-button flow.**
 

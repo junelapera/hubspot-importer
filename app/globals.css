@@ -155,4 +155,17 @@
     @apply font-sans;
     scroll-behavior: smooth;
   }
+  /* Strip browser-default spinner controls on number inputs so they match
+     the height + padding of text inputs. Without this, WebKit/Firefox
+     render `<input type="number">` slightly taller and offset from
+     regular text inputs even when both share the same h-9 + px-3. */
+  input[type="number"]::-webkit-inner-spin-button,
+  input[type="number"]::-webkit-outer-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+  }
+  input[type="number"] {
+    -moz-appearance: textfield;
+    appearance: textfield;
+  }
 }

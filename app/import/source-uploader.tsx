@@ -357,7 +357,7 @@ function InputField({
       <input
         name={name}
         disabled={disabled}
-        className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/50"
+        className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/50"
         {...rest}
       />
       {hint ? <span className="text-xs text-muted-foreground">{hint}</span> : null}
