@@ -2,7 +2,57 @@
 
 Running log of where the HubDB Importer project is, what's in flight, and what's next. Update as we go.
 
-## Current state — 2026-09-27 (mid-morning)
+## Current state — 2026-09-27 (late morning)
+
+**Brand-color-per-section navigation + shared PageHeader component + auth-page logos + phase-tag cleanup.** Visual identity pass on top of the auth + checkbox work earlier today. Sidebar and every top-level page now share a per-section color from the S2 palette so the sidebar reads as a mini map of the app — you always know where you are.
+
+**Color-per-section mapping** (defined in `PAGE_ACCENTS` in `components/ui/page-header.tsx` and mirrored in the `ITEMS.activeBg` field on `app/nav.tsx`):
+
+- **Home** → **ochre** `#d68231` (primary brand, welcoming)
+- **Portals** → **purple** `#64518c` (integration / connection feel)
+- **Import** → **grass** `#1ba151` (action / go)
+- **Jobs** → **burgundy** `#7b2728` (history / archival)
+- **Docs** → **navy** `#164256` (informational)
+
+**What shipped:**
+
+1. **`components/ui/page-header.tsx` (new)** — shared `PageHeader` component (icon + h1 + description + optional trailing children slot). Renders the sidebar icon at 40px in the accent color to the left of the h1 (`iconMaskStyle` inlined here since it wants a color param, distinct from the nav's `bg-current` version). H1 text color is the accent too — so the identity ties together (sidebar chip → page header → visible everywhere). `PAGE_ACCENTS` const exports `{icon, color}` per section so the palette lives in exactly one place. Optional `children` slot on the header keeps the schema page's EnvBadge + Hub-ID inline with the h1 baseline (no layout regression)
+2. **All 6 top-level pages migrated to PageHeader** — `app/page.tsx` (Home), `app/portals/page.tsx`, `app/import/page.tsx`, `app/jobs/page.tsx`, `app/docs/page.tsx`, and `app/portals/[id]/schema/page.tsx` (nested under Portals, so inherits purple). Existing per-page hero markup replaced; description content ported verbatim (JSX where the description had inline code / links). No behavior changes, just visual consistency
+3. **Nav active state uses per-item color** (`app/nav.tsx`) — `NavItem` type gains `activeBg: string` field (CSS color expression, always `var(--color-brand-*)`). Sidebar + MobileNav both replace `bg-foreground` with an inline `style={{ backgroundColor: item.activeBg }}` when active. Text stays `text-background` (offwhite) so contrast reads well against every dark brand color. Icons via `bg-current` mask trick inherit the offwhite automatically — no per-item icon config needed
+4. **Saltedstone wordmark on auth pages** (`app/login/page.tsx` + `app/register/page.tsx`) — centered 32px `dark:invert` wordmark above the login/register card, same SVG as the sidebar. Ties the auth screens to the brand identity users see once logged in
+5. **"Phase 1 · MVP" / "Phase 1 · F1/F2/F3" tags removed** from Home hero, Portals page, Import page, Schema-planner page, and sidebar header. The phase-based naming was scaffolding from the initial phased build; nothing about Phase 1 was still user-relevant. Cleaner header on every screen
+6. **`proxy.ts` matcher fix — static file extensions** — extended the matcher regex to skip `.svg/.png/.jpg/.jpeg/.gif/.webp/.ico/.avif` file requests so `public/*.svg` (like `saltedstone-logo.svg`) doesn't hit the auth gate and 307 to `/login`. Fixed the "logo not displaying" bug the user hit on `/login`. `PUBLIC_PREFIXES` still lists `/favicon`, `/icon`, `/apple-icon` as belt-and-suspenders if the matcher ever regresses
+7. **S2-branded Checkbox rolled out to mapping tables** (context — this was a small earlier commit today) — native input with `appearance-none` + inline-SVG check + ochre fill. Two call sites: `mapping-editor.tsx` naturalKey toggle + `schema-infer-panel.tsx` NK checkbox
+
+**Files touched:** `components/ui/page-header.tsx` (new), `app/nav.tsx` (activeBg field + inline style), `app/page.tsx`, `app/portals/page.tsx`, `app/import/page.tsx`, `app/jobs/page.tsx`, `app/docs/page.tsx`, `app/portals/[id]/schema/page.tsx` (all migrated to PageHeader), `app/login/page.tsx` + `app/register/page.tsx` (logo added), `proxy.ts` (matcher fix). 255 vitest cases / 19 suites still green (UI-only changes), tsc + lint clean
+
+**Design decisions worth remembering:**
+- **Colors picked by semantic feel, not aesthetic order.** Home = ochre (primary), Portals = purple (integration), Import = grass (action), Jobs = burgundy (history), Docs = navy (informational). Rationale stays in the code comment above `ITEMS` so future rearrangement doesn't lose the intent
+- **`PAGE_ACCENTS` const is the single source of truth.** Both `page-header.tsx` and `nav.tsx` reference it (well, nav has its own `ITEMS` array with parallel `activeBg`, but they're kept in the same colors intentionally). Swap the color for a section → both nav pill and page header change together
+- **H1 in accent color, not just the icon.** Considered just tinting the icon and keeping the h1 forest for readability. Rejected — half-measure. The accent color needs to appear in more than one spot per page to read as "themed." Icon (40px) + H1 = enough anchor without dominating
+- **Icon via CSS mask (unchanged pattern), color via `backgroundColor` in style.** Nav icons use `bg-current` + text color for the mask fill (works because the mask has a color context from the enclosing text). Page-header icons don't have a natural "current color" — the page-header container isn't tinted — so the mask needs an explicit `backgroundColor` passed via inline style. Two different call sites of the same technique
+- **Schema page inherits Portals color.** Nested route → visually treats as a subsection. Kept the portal label as the h1 text (as before). EnvBadge + Hub-ID sit in the `children` slot on the h1 baseline
+- **Wordmark on auth pages uses the same SVG as sidebar.** Same `dark:invert` treatment. Reused, not duplicated — file paths are identical
+- **`proxy.ts` matcher fix vs adding paths to PUBLIC_PREFIXES.** Chose the matcher regex because it's zero-cost (Edge runtime skips the middleware entirely) — vs. running the middleware and checking a prefix list on every static asset request. `PUBLIC_PREFIXES` kept for belt-and-suspenders + for the auth routes (`/login`, `/register`, `/api/auth/`) which do need middleware invocation to skip
+
+**Files touched by the Checkbox pass earlier today** (rolled into this entry so the story reads as one visual polish session): `components/ui/checkbox.tsx` (new — 5th shadcn/Base UI primitive alongside `button`, `select`, `tutorial-panel`, `page-header`). Native input with `appearance-none` + inline-SVG check mark. `size-3.5` for dense table rows. `Omit<InputHTMLAttributes, "type">` so callers can't accidentally change the type. Swapped both native checkboxes in `mapping-editor.tsx` and `schema-infer-panel.tsx`
+
+**Still open on `phases/phase-2.md`:**
+- OAuth flow for private Google Sheets (deferred)
+- Refresh-from-sheet action for saved mappings
+- Full cycle handling — two-phase write for cyclic FK graphs, self-reference end-to-end
+- F11 tail — re-run saved mapping against a different portal
+- Detect interrupted jobs on runner restart (Phase 3 with Inngest)
+- (Provision-writes-back-tableId — Phase-1 F3 polish carried over)
+
+**Next up (unblocked):**
+- **Sandbox smoke test of auth end-to-end** (register + login + logout + reject non-saltedstone.com)
+- **Google OAuth via Supabase Auth** — one-click login for the team; natural next auth step
+- **Inngest step-function rewrite** — still the biggest unlock
+
+---
+
+## Prior state — 2026-09-27 (mid-morning)
 
 **S2-branded Checkbox component + rolled out to the two mapping-table sites.** Small UI polish — the naturalKey toggles on the products/brands/categories mapping card (`mapping-editor.tsx`) and the schema-inference panel (`schema-infer-panel.tsx`) used bare native `<input type="checkbox">` with browser-default styling, which looked out of place next to the S2-branded shadcn Buttons + Selects. New `components/ui/checkbox.tsx` (5th shadcn/Base UI primitive alongside `button`, `select`, `tutorial-panel`) uses a native input under the hood (accessibility for free — keyboard nav, screen readers, form participation) with `appearance-none` to strip browser styling and a custom inline-SVG check mark. Checked state: brand-ochre fill (`bg-primary`) + white check; unchecked: `border-input` + `bg-background`; focus-visible ring matches the other primitives; disabled state has the standard `opacity-50 cursor-not-allowed`. Both call sites use `size-3.5` (14px) for tight table-row fit. Component wraps a native `<input>` in a `forwardRef` with `Omit<InputHTMLAttributes, "type">` so consumers get everything except the ability to change the type — the "checkbox" type is baked in.
 
