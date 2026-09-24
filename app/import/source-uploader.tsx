@@ -24,6 +24,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { TutorialPanel, TutorialSteps, TutorialTip } from "@/components/ui/tutorial-panel";
 
 type ParsedTable = {
   name: string;
@@ -327,6 +328,38 @@ export function SourceUploader({ portals }: { portals: PortalSummary[] }) {
 
         {mode === "csv" ? (
           <form onSubmit={submitCsv} className="space-y-4 rounded-md border border-border p-4">
+            <TutorialPanel>
+              <p>
+                A CSV is a plain-text spreadsheet — the kind you get by exporting from Excel, Google
+                Sheets, or Numbers. Each CSV file you upload becomes one HubDB table.
+              </p>
+              <TutorialSteps>
+                <li>
+                  Prepare your data so <strong>row 1 is the column headers</strong> (like{" "}
+                  <code className="rounded bg-muted px-1 text-xs">sku,name,price</code>) and every row
+                  below is one record.
+                </li>
+                <li>
+                  Save each table as its own CSV file: <em>File → Save As</em> (Excel/Numbers) or{" "}
+                  <em>File → Download → CSV</em> (Google Sheets).
+                </li>
+                <li>
+                  Name each file after the HubDB table it represents (e.g.{" "}
+                  <code className="rounded bg-muted px-1 text-xs">brands.csv</code>,{" "}
+                  <code className="rounded bg-muted px-1 text-xs">products.csv</code>) — the filename
+                  becomes the table name here.
+                </li>
+                <li>
+                  Click <em>Choose files</em> below and pick all your CSVs at once, then{" "}
+                  <em>Parse CSV</em>.
+                </li>
+              </TutorialSteps>
+              <TutorialTip>
+                If Excel gave you a semicolon-delimited file (common outside the US), pick{" "}
+                <code className="rounded bg-muted px-1 text-xs">;</code> in the Delimiter dropdown. If
+                characters look garbled after parsing, try <em>utf-16le</em> under Encoding.
+              </TutorialTip>
+            </TutorialPanel>
             <label className="flex flex-col gap-1 text-sm">
               <span className="font-medium">CSV files (one per table)</span>
               <input
@@ -393,6 +426,37 @@ export function SourceUploader({ portals }: { portals: PortalSummary[] }) {
           </form>
         ) : mode === "xlsx" ? (
           <form onSubmit={submitXlsx} className="space-y-4 rounded-md border border-border p-4">
+            <TutorialPanel>
+              <p>
+                XLSX is Microsoft Excel&apos;s file format (.xlsx). Each <strong>sheet tab</strong>{" "}
+                inside the workbook becomes its own HubDB table — so one workbook can carry multiple
+                related tables (brands + categories + products, etc.) in a single file.
+              </p>
+              <TutorialSteps>
+                <li>Open your workbook in Excel, Google Sheets, or Numbers.</li>
+                <li>
+                  Make sure each sheet tab has its column headers on <strong>row 1</strong> and one
+                  record per row underneath.
+                </li>
+                <li>
+                  Rename each sheet tab to match the HubDB table it represents (e.g.{" "}
+                  <code className="rounded bg-muted px-1 text-xs">brands</code>,{" "}
+                  <code className="rounded bg-muted px-1 text-xs">categories</code>,{" "}
+                  <code className="rounded bg-muted px-1 text-xs">products</code>).
+                </li>
+                <li>
+                  Save as <em>.xlsx</em>. In Google Sheets: <em>File → Download → Microsoft Excel</em>.
+                </li>
+                <li>Upload the file below and click <em>Parse XLSX</em>.</li>
+              </TutorialSteps>
+              <TutorialTip>
+                Leave <em>Sheet allowlist</em> blank to import every sheet in the workbook. To only
+                import specific ones, type their names comma-separated (e.g.{" "}
+                <code className="rounded bg-muted px-1 text-xs">brands, products</code>). Single-sheet
+                workbooks are named after the filename; multi-sheet workbooks combine as{" "}
+                <code className="rounded bg-muted px-1 text-xs">filename__sheetname</code>.
+              </TutorialTip>
+            </TutorialPanel>
             <label className="flex flex-col gap-1 text-sm">
               <span className="font-medium">XLSX files</span>
               <input
@@ -448,12 +512,50 @@ export function SourceUploader({ portals }: { portals: PortalSummary[] }) {
           </form>
         ) : mode === "gsheets" ? (
           <form onSubmit={submitGsheets} className="space-y-4 rounded-md border border-border p-4">
+            <TutorialPanel>
+              <p>
+                Import straight from a Google Sheet without downloading anything. The sheet stays
+                private in your Drive — only the specific tab you publish becomes accessible via the
+                secret URL you paste here.
+              </p>
+              <TutorialSteps>
+                <li>Open your Google Sheet in a browser.</li>
+                <li>
+                  Menu: <em>File → Share → Publish to web</em>.
+                </li>
+                <li>
+                  In the dialog, use the <strong>left dropdown</strong> to pick a specific sheet tab
+                  (not <em>Entire document</em>).
+                </li>
+                <li>
+                  Use the <strong>right dropdown</strong> to change the format from <em>Web page</em>{" "}
+                  to <strong>Comma-separated values (.csv)</strong>.
+                </li>
+                <li>
+                  Click <em>Publish</em>, confirm the prompt, and copy the URL Google shows you (it
+                  looks like{" "}
+                  <code className="rounded bg-muted px-1 text-xs">
+                    …/spreadsheets/d/e/…/pub?output=csv&gid=…
+                  </code>
+                  ).
+                </li>
+                <li>
+                  Paste it below, name the table (e.g.{" "}
+                  <code className="rounded bg-muted px-1 text-xs">brands</code>), and click{" "}
+                  <em>Add another sheet</em> to repeat for each additional table.
+                </li>
+                <li>Click <em>Fetch sheets</em> when all URLs are in.</li>
+              </TutorialSteps>
+              <TutorialTip>
+                Edits you make to the sheet after publishing take a minute or two to appear at the
+                published URL — Google caches it. If you re-fetch and the data looks stale, wait
+                90 seconds and try again.
+              </TutorialTip>
+            </TutorialPanel>
             <div className="space-y-1 text-sm">
               <p className="font-medium">Published Google Sheets URLs</p>
               <p className="text-xs text-muted-foreground">
-                In each sheet, use <em>File → Share → Publish to web</em>, pick the sheet tab you want, choose the{" "}
-                <strong>CSV</strong> format, and paste the URL below. One URL per HubDB table. The sheet stays
-                private; only rows visible in the published tab are fetched.
+                One URL per HubDB table.
               </p>
             </div>
 
@@ -518,6 +620,38 @@ export function SourceUploader({ portals }: { portals: PortalSummary[] }) {
           </form>
         ) : (
           <form onSubmit={submitJson} className="space-y-4 rounded-md border border-border p-4">
+            <TutorialPanel title="What's JSON? (developer format — most users can skip)">
+              <p>
+                JSON is a text format typically written by developers or exported from another
+                system. If you&apos;re not sure what JSON is, use the <strong>CSV</strong>,{" "}
+                <strong>XLSX</strong>, or <strong>Google Sheets</strong> tabs instead — they cover
+                the same use case without the syntax.
+              </p>
+              <p>Two shapes are accepted:</p>
+              <TutorialSteps>
+                <li>
+                  <strong>Keyed by table name</strong> (each key is a table, each value is an array of
+                  rows):
+                  <pre className="mt-1 overflow-x-auto rounded bg-muted p-2 text-xs">{`{
+  "brands":     [{ "slug": "acme", "name": "Acme" }],
+  "categories": [{ "slug": "tools", "name": "Tools" }]
+}`}</pre>
+                </li>
+                <li>
+                  <strong>Array of {'{table, rows}'} objects</strong>:
+                  <pre className="mt-1 overflow-x-auto rounded bg-muted p-2 text-xs">{`[
+  { "table": "brands",     "rows": [{ "slug": "acme", "name": "Acme" }] },
+  { "table": "categories", "rows": [{ "slug": "tools", "name": "Tools" }] }
+]`}</pre>
+                </li>
+              </TutorialSteps>
+              <TutorialTip>
+                Each cell value must be a plain string, number, or boolean — no nested objects or
+                arrays. If you have a multi-value field (like multiple category tags), join them
+                with a delimiter like <code className="rounded bg-muted px-1 text-xs">,</code> and
+                configure that in the foreign-key panel on the mapping step.
+              </TutorialTip>
+            </TutorialPanel>
             <label className="flex flex-col gap-1 text-sm">
               <span className="font-medium">JSON payload</span>
               <textarea

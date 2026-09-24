@@ -5,6 +5,7 @@ import { createSupabaseServerClient } from "@/lib/db/supabase";
 import {
   createHubdbClient,
   fetchPortalSchema,
+  HubdbError,
   importRows,
   opsFromClientForImport,
   pushLive,
@@ -231,6 +232,16 @@ export async function POST(
       { onEvent: (e) => events.push(e), signal: req.signal, hooks: persistHooks },
     );
   } catch (err) {
+    // HubdbError's default .message is just "HubDB POST /path → status" —
+    // the actual "which cell got rejected" body lives on .responseBody. Pull
+    // it up so the surfaced message + response body are useful.
+    const hubdbErr = err instanceof HubdbError ? err : null;
+    if (hubdbErr) {
+      console.error(
+        `[execute] HubDB error ${hubdbErr.method} ${hubdbErr.path} → ${hubdbErr.status}:`,
+        JSON.stringify(hubdbErr.responseBody, null, 2),
+      );
+    }
     const message =
       err instanceof ImportPreflightError
         ? `preflight failed on "${err.table}": ${err.message}`
@@ -279,7 +290,14 @@ export async function POST(
         persistenceError,
       });
     }
-    return errorResponse(502, message, { events, jobId, persistenceError });
+    return errorResponse(502, message, {
+      events,
+      jobId,
+      persistenceError,
+      hubspot: hubdbErr
+        ? { status: hubdbErr.status, path: hubdbErr.path, method: hubdbErr.method, body: hubdbErr.responseBody }
+        : undefined,
+    });
   }
 
   const published: { table: string; publishedAt?: string; error?: string }[] = [];

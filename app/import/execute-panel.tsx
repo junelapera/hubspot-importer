@@ -27,12 +27,13 @@ type ExecuteResponse = {
   row?: RowError;
   error?: string;
   issues?: unknown[];
+  hubspot?: { status: number; path: string; method: string; body?: unknown };
 };
 
 type Stage =
   | { kind: "idle" }
   | { kind: "running" }
-  | { kind: "error"; message: string; issues?: unknown[] }
+  | { kind: "error"; message: string; issues?: unknown[]; hubspot?: ExecuteResponse["hubspot"] }
   | { kind: "fail-fast"; response: ExecuteResponse; startedAt: string; finishedAt: string; message: string }
   | { kind: "cancelled"; response: ExecuteResponse; startedAt: string; finishedAt: string; message: string }
   | { kind: "done"; response: ExecuteResponse; startedAt: string; finishedAt: string };
@@ -104,7 +105,12 @@ export function ExecutePanel({
           });
           return;
         }
-        setStage({ kind: "error", message: body.error ?? `HTTP ${res.status}`, issues: body.issues });
+        setStage({
+          kind: "error",
+          message: body.error ?? `HTTP ${res.status}`,
+          issues: body.issues,
+          hubspot: body.hubspot,
+        });
         return;
       }
       setStage({ kind: "done", response: body, startedAt, finishedAt });
@@ -197,6 +203,16 @@ export function ExecutePanel({
           <p>{stage.message}</p>
           {stage.issues && stage.issues.length > 0 ? (
             <pre className="mt-2 overflow-x-auto text-xs">{JSON.stringify(stage.issues, null, 2)}</pre>
+          ) : null}
+          {stage.hubspot ? (
+            <details className="mt-2 text-xs">
+              <summary className="cursor-pointer font-medium">
+                HubSpot response — {stage.hubspot.method} {stage.hubspot.path} → {stage.hubspot.status}
+              </summary>
+              <pre className="mt-2 overflow-x-auto rounded bg-background/40 p-2 text-foreground">
+                {JSON.stringify(stage.hubspot.body, null, 2)}
+              </pre>
+            </details>
           ) : null}
         </div>
       ) : null}

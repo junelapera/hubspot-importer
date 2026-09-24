@@ -3,9 +3,11 @@
 import { useState, useTransition } from "react";
 import type { FormEventHandler } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import type { Conflict, DiffPlan, SchemaColumn, TableDiff } from "@/lib/schema";
 import type { ProvisionEvent, ProvisionResult } from "@/lib/hubdb";
+import { TutorialPanel, TutorialSteps, TutorialTip } from "@/components/ui/tutorial-panel";
 
 type PlanResponse = {
   plan: DiffPlan;
@@ -135,6 +137,59 @@ export function SchemaPlanner({ portalId }: { portalId: string }) {
           </span>
         ) : null}
       </header>
+
+      <TutorialPanel>
+        <p>
+          <strong>Provisioning</strong> creates the HubDB tables your import will land in. The app
+          does this in <strong>two safe steps</strong> so nothing changes in HubSpot until you
+          confirm.
+        </p>
+        <p>
+          <strong>Don&apos;t have a schema.json?</strong> Skip this page — go to{" "}
+          <Link href="/import" className="text-primary underline-offset-2 hover:underline">
+            Import
+          </Link>{" "}
+          instead, upload your source files, and use the <em>Suggest a schema</em> panel above the
+          mapping cards. It auto-detects column types + relationships and downloads a{" "}
+          <code className="rounded bg-muted px-1 text-xs">schema.json</code> for you. Come back
+          here to paste it in.
+        </p>
+        <p>If you already have a schema.json, here&apos;s how it works:</p>
+        <TutorialSteps>
+          <li>Paste the JSON below or upload the .json file.</li>
+          <li>
+            Click <strong>Generate plan</strong>. The app compares your schema against what&apos;s
+            already in this HubSpot portal and gives each table a verdict:
+            <ul className="mt-1.5 list-disc space-y-1 pl-5 text-xs">
+              <li>
+                <strong>create</strong> — table doesn&apos;t exist yet; will be created.
+              </li>
+              <li>
+                <strong>match</strong> — already exists and matches; nothing to do.
+              </li>
+              <li>
+                <strong>update</strong> — exists but missing some columns; they&apos;ll be added.
+              </li>
+              <li>
+                <strong>conflict</strong> — an existing column has a different type. The app
+                <em> refuses to change existing columns</em>, so this stops the flow and asks
+                you to reconcile by hand in HubSpot.
+              </li>
+            </ul>
+            No writes happen at this step — you can click <em>Generate plan</em> as many times as
+            you want to preview.
+          </li>
+          <li>
+            If no conflicts, click <strong>Provision</strong>. The app creates missing tables and
+            columns in the right order (foreign tables first so links land correctly).
+          </li>
+        </TutorialSteps>
+        <TutorialTip>
+          Everything created here lands in HubSpot&apos;s <em>draft</em> state — the tables
+          aren&apos;t visible to your website or via HubL until they&apos;re published. Publishing
+          happens later, on the Execute step of the import wizard.
+        </TutorialTip>
+      </TutorialPanel>
 
       <form onSubmit={onSubmit} className="space-y-3 rounded-md border border-border p-4">
         <label className="flex flex-col gap-1 text-sm">

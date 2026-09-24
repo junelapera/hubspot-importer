@@ -133,7 +133,8 @@ export type RowErrorKind =
   | "missing-natural-key"
   | "unresolved-fk"
   | "unmapped-table"
-  | "missing-target-key-map";
+  | "missing-target-key-map"
+  | "type-mismatch";
 
 export type RowError = {
   table: string;
@@ -302,6 +303,56 @@ function recordStub(
   if (!byKey.has(nk)) byKey.set(nk, raw);
 }
 
+// Sentinel returned by coerceCellForColumn when the cell should be dropped
+// from the row entirely (e.g. empty string for a NUMBER column — sending
+// null clears the cell, but empty string 400s).
+const SKIP_CELL = Symbol("skip-cell");
+
+class CoerceError {
+  constructor(readonly message: string) {}
+}
+
+// HubSpot's batch write API is strict about JSON types on non-string columns:
+// NUMBER / CURRENCY reject `"29.99"` (string) and require `29.99` (number);
+// BOOLEAN wants a real JSON boolean; DATE / DATETIME want epoch milliseconds
+// (integer). Our source layer treats every cell as a string, so coerce at
+// the write boundary based on the target column type.
+function coerceCellForColumn(raw: unknown, columnType: string): unknown {
+  if (raw === undefined || raw === null) return SKIP_CELL;
+  const s = typeof raw === "string" ? raw.trim() : raw;
+  if (s === "") return SKIP_CELL;
+
+  switch (columnType) {
+    case "NUMBER":
+    case "CURRENCY": {
+      // Strip common formatting (currency symbols, thousands separators)
+      // before parsing. HubDB stores numbers as JS `number` — 64-bit float.
+      const cleaned = typeof s === "string" ? s.replace(/[,$€£¥\s]/g, "") : s;
+      const n = typeof cleaned === "number" ? cleaned : Number(cleaned);
+      if (!Number.isFinite(n)) return new CoerceError("not a number");
+      return n;
+    }
+    case "BOOLEAN": {
+      if (typeof s === "boolean") return s;
+      const lower = String(s).toLowerCase();
+      if (lower === "true" || lower === "1" || lower === "yes" || lower === "y") return true;
+      if (lower === "false" || lower === "0" || lower === "no" || lower === "n") return false;
+      return new CoerceError("not a boolean (accepted: true/false/1/0/yes/no)");
+    }
+    case "DATE":
+    case "DATETIME": {
+      if (typeof s === "number" && Number.isFinite(s)) return Math.trunc(s);
+      const parsed = Date.parse(String(s));
+      if (!Number.isFinite(parsed)) return new CoerceError(`not a valid ${columnType}`);
+      return parsed;
+    }
+    default:
+      // TEXT, RICHTEXT, URL, IMAGE, SELECT, MULTISELECT, VIDEO, CTA, FILE,
+      // LOCATION — send as-is. HubSpot parses these server-side.
+      return raw;
+  }
+}
+
 function planRow(
   table: SchemaTable,
   source: SourceRow,
@@ -352,7 +403,22 @@ function planRow(
     if (raw === undefined) continue;
 
     if (col.type !== "FOREIGN_ID") {
-      values[col.name] = raw;
+      const coerced = coerceCellForColumn(raw, col.type);
+      if (coerced === SKIP_CELL) continue;
+      if (coerced instanceof CoerceError) {
+        return {
+          kind: "error",
+          sourceIndex,
+          error: {
+            table: table.name,
+            sourceIndex,
+            kind: "type-mismatch",
+            column: col.name,
+            detail: `Column "${col.name}" (${col.type}): ${coerced.message} (got ${JSON.stringify(raw)})`,
+          },
+        };
+      }
+      values[col.name] = coerced;
       continue;
     }
 

@@ -367,8 +367,9 @@ function ForeignKeyPanel({
         <label className="flex flex-col gap-1">
           <span className="font-medium">Foreign source table</span>
           <Select
-            value={cfg.sourceTable ?? undefined}
-            onValueChange={(v) => onChange({ sourceTable: v, matchKey: null })}
+            value={cfg.sourceTable ?? ""}
+            onValueChange={(v) => onChange({ sourceTable: v ?? null, matchKey: null })}
+            items={siblingSources.map((s) => ({ value: s.name, label: s.name }))}
           >
             <SelectTrigger size="sm" className="w-full">
               <SelectValue placeholder="— pick a sibling source —" />
@@ -387,9 +388,10 @@ function ForeignKeyPanel({
         <label className="flex flex-col gap-1">
           <span className="font-medium">Match key column</span>
           <Select
-            value={cfg.matchKey ?? undefined}
-            onValueChange={(v) => onChange({ matchKey: v })}
+            value={cfg.matchKey ?? ""}
+            onValueChange={(v) => onChange({ matchKey: v ?? null })}
             disabled={!foreignSource}
+            items={(foreignSource?.headers ?? []).map((h) => ({ value: h, label: h }))}
           >
             <SelectTrigger size="sm" className="w-full">
               <SelectValue placeholder="— pick a column —" />
