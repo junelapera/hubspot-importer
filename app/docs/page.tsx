@@ -53,11 +53,11 @@ export default function DocsPage() {
         <p>
           HubSpot&apos;s native HubDB CSV importer <em>cannot</em> populate{" "}
           <Code>FOREIGN_ID</Code> columns — foreign relationships have to be
-          linked one row at a time in the UI. This app takes CSV or JSON source
-          files, resolves foreign keys from human-readable natural keys (SKU,
-          slug, name), and writes rows in dependency order so{" "}
-          <Code>FOREIGN_ID</Code> cells land with real HubDB row IDs on the
-          first pass.
+          linked one row at a time in the UI. This app takes source data (CSV,
+          XLSX, JSON, or a published Google Sheet), resolves foreign keys from
+          human-readable natural keys (SKU, slug, name), and writes rows in
+          dependency order so <Code>FOREIGN_ID</Code> cells land with real
+          HubDB row IDs on the first pass.
         </p>
         <p>
           Two ideas do most of the work:{" "}
@@ -143,11 +143,15 @@ export default function DocsPage() {
           body={
             <>
               Open <NavLink href="/import">Import</NavLink> and pick the
-              portal. On the <em>Source</em> tab, upload{" "}
-              <Code>brands.csv</Code>, <Code>categories.csv</Code>, and{" "}
-              <Code>products.csv</Code> (or paste JSON). Each file shows a
-              20-row preview + parse warnings. Delimiter, encoding, and header
-              row auto-detect — override in the toolbar if needed.
+              portal. Pick a source tab — <em>CSV upload</em>,{" "}
+              <em>XLSX upload</em> (one table per sheet), <em>JSON paste</em>,
+              or <em>Google Sheets</em> (one published-CSV URL per table; see
+              the Reference below for how to get the URL). For the example
+              dataset, upload <Code>brands.csv</Code>,{" "}
+              <Code>categories.csv</Code>, and <Code>products.csv</Code>.
+              Each table shows a 20-row preview + parse warnings. Delimiter,
+              encoding, and header row auto-detect — override in the toolbar
+              if needed.
             </>
           }
         />
@@ -314,6 +318,41 @@ export default function DocsPage() {
       </Section>
 
       <Section id="reference" title="Reference">
+        <Subsection title="Google Sheets source">
+          <p>
+            The <em>Google Sheets</em> source tab fetches published-to-web
+            CSV URLs server-side. To get a URL:
+          </p>
+          <ol className="list-decimal space-y-1 pl-5">
+            <li>
+              Open the sheet, then <em>File → Share → Publish to web</em>.
+            </li>
+            <li>
+              In the dialog, pick the specific sheet tab (not{" "}
+              <em>Entire document</em>) and choose{" "}
+              <strong>Comma-separated values (.csv)</strong>.
+            </li>
+            <li>
+              Click <em>Publish</em>, confirm, and copy the URL.
+            </li>
+          </ol>
+          <p>
+            Paste one URL per HubDB table in the wizard, give each a table
+            name, and click <em>Fetch sheets</em>. The importer also accepts{" "}
+            <Code>/pubhtml</Code> URLs (rewritten to the CSV form),{" "}
+            <Code>/edit#gid=…</Code> URLs (rewritten to{" "}
+            <Code>/export?format=csv</Code>; requires{" "}
+            <em>anyone with the link can view</em> sharing), and gviz
+            (<Code>/gviz/tq?tqx=out:csv</Code>) URLs.
+          </p>
+          <p>
+            <strong>Private-sheet support</strong> (OAuth) is intentionally
+            deferred — publishing to web covers the common case without a
+            Google Cloud project. The published-CSV URL is a secret-URL,
+            not a public listing; only rows visible in the published tab
+            are fetched.
+          </p>
+        </Subsection>
         <Subsection title="Schema inference">
           <p>
             The <em>Suggest a schema</em> panel on{" "}

@@ -2,7 +2,39 @@
 
 Running log of where the HubDB Importer project is, what's in flight, and what's next. Update as we go.
 
-## Current state — 2026-09-26 (afternoon)
+## Current state — 2026-09-26 (evening)
+
+**Phase 2 — Google Sheets source shipped (published-to-web CSV URL flavor).** Seventh Phase-2 epic; one of three checkboxes on the "Google Sheets source" block is ticked (rewrote the block to reflect what actually shipped vs. what stays deferred). Chose the published-CSV URL slice over the full OAuth flow so we ship without pulling in a Google Cloud project, consent screen, or per-user token storage — covers the common case where the sheet owner is fine publishing a public link. OAuth for private sheets stays deferred until someone hits the "can't publish this sheet" ceiling.
+
+1. **`lib/source/gsheets.ts` (new)** — pure `normalizeGoogleSheetsUrl(url)` handles four Google Sheets URL shapes and rewrites where safe: canonical `/pub?output=csv` (pass-through), `/pubhtml` (rewrite path to `/pub`, set `output=csv`, preserve `gid`), `/edit#gid=…` and bare `/spreadsheets/d/{id}` (rewrite to `/export?format=csv`, lift `#gid=` from hash fragment to query, warn that the sheet must be publicly shared), and gviz (`/gviz/tq?tqx=out:csv`, pass-through). Non-`docs.google.com` hosts pass through with a warning ("not docs.google.com — fetching as a plain CSV endpoint"). Unrecognized `docs.google.com` paths reject with a message pointing at the *File → Share → Publish to web* flow. 11 vitest cases covering each URL shape, hash-gid lifting, non-numeric gid guard, empty/malformed input, non-`https` schemes, and unrecognized paths
+2. **`POST /api/sources/gsheets` (new)** — mirrors the CSV/XLSX endpoint contract but sources bytes over the network rather than from a multipart upload. Accepts JSON body `{ sources: [{tableName, url}, ...] }`; validates that each entry has a non-empty name + URL and dedupes table names client-side of the parse. For each source: normalize the URL, `fetch()` server-side with a 30s `AbortController` timeout + 20 MB response cap + explicit `User-Agent` header (Google sometimes serves HTML to bot-like UAs), guard against `text/html` content-type (returns 502 with a "sheet may not be published or shared publicly" hint — papaparse would otherwise silently produce garbage rows), pipe through `parseCsv` + `validateSource`, return the same `{name, headers, preview, rows, totalRows, detected, parseWarnings, validationWarnings}` shape as the other source endpoints. Also emits a top-level `warnings[]` array carrying the per-source `normalizeGoogleSheetsUrl` warnings so the UI can surface "rewrote /edit URL" notices
+3. **"Google Sheets" tab in `SourceUploader`** — fourth `ModeTab` alongside CSV / XLSX / JSON. Dynamic list of `{tableName, url}` pairs with Add another sheet / Remove buttons (Remove disabled when only one row remains). Text input for the table name, URL input with monospace font (URLs are long), submit button (`Fetch sheets`) POSTs to `/api/sources/gsheets`. Response drops into the same `SubmitState.success` variant so `SchemaInferPanel` / mapping / dry run / execute all light up unchanged
+4. **`phases/phase-2.md` rewritten** — the "Google Sheets source" block used to list OAuth / sheet picker / refresh action. Rewrote to reflect the actual shipped scope (Published-CSV URL flow ✅) and what's deferred (OAuth for private sheets, refresh action which needs to store the URL alongside the mapping profile first)
+
+**Files touched:** `lib/source/gsheets.ts` (new), `lib/source/gsheets.test.ts` (new, 11 cases), `lib/source/index.ts` (barrel), `app/api/sources/gsheets/route.ts` (new), `app/import/source-uploader.tsx` (fourth tab + `submitGsheets` + dynamic row state), `phases/phase-2.md` (block rewrite). 247 vitest cases / 18 suites (+11 net-new), tsc + lint clean, dev server serves 200 on `/` + `/import`
+
+**Design decisions worth remembering:**
+- **Server-side fetch, not client-side.** Considered fetching the CSV from the browser to skip the Vercel function invocation. Killed for two reasons: (a) CORS — Google's `/pub` endpoint doesn't send permissive CORS headers, so a browser `fetch` would fail on preflight, and (b) size cap + timeout — server-side we can enforce a 20 MB response cap and 30s AbortController timeout; browser-side both are subject to user network conditions. The extra function invocation is a small cost for a much simpler + more predictable failure mode
+- **HTML content-type guard is a 502, not a silent parse.** When a sheet isn't published (or the user pasted an `/edit` URL for a private sheet), Google serves the sign-in HTML page. Papaparse would happily parse the HTML as one long CSV row and return garbage. Checking `Content-Type: text/html` before parse and 502-ing with a specific hint saves the user from "why did my import produce nonsense rows" debugging
+- **`normalizeGoogleSheetsUrl` errs on the side of transforming rather than rejecting.** Users paste URLs from the browser address bar (`/edit#gid=…`), not always from *File → Publish to web*. Rewriting to `/export?format=csv` works for public sheets and fails loudly for private ones — better UX than rejecting the URL outright and forcing the user to hunt for the publish flow. The rewrite always includes a warning so the user sees what we did
+- **One URL per HubDB table, not one URL per workbook.** Considered accepting the workbook URL and enumerating sheets via the gviz `sheet=` param. Would need us to know the sheet names ahead of time (which we don't for a bare workbook URL) or make an extra probe request. One URL per table is explicit, matches the XLSX per-sheet-is-a-table mental model, and users get to control the table name independently of the sheet tab name
+
+**Still open on `phases/phase-2.md`:**
+- OAuth flow for private Google Sheets (deferred — GCP project + consent screen; upgrade when someone hits the ceiling)
+- Refresh-from-sheet action for saved mappings (needs to store the sheet URL alongside the mapping profile, then a re-fetch button on `/import`)
+- Full cycle handling — two-phase write for cyclic FK graphs, self-reference end-to-end
+- F11 tail — re-run saved mapping against a different portal
+- Detect interrupted jobs on runner restart (Phase 3 with Inngest)
+- (Provision-writes-back-tableId — Phase-1 F3 polish carried over)
+
+**Next up (unblocked):**
+- **Sandbox smoke test of gsheets** — publish a real sheet, paste the URL, confirm the fetch + parse + mapping flow end-to-end
+- **Inngest step-function rewrite** — turns the persist-and-resume into full tab-close-safe durability; last "MVP → production scale" unlock
+- **Refresh-from-sheet** — small F11-adjacent quality-of-life win now that we have the gsheets source; needs `mappings.state_json` to carry the URL
+
+---
+
+## Prior state — 2026-09-26 (afternoon)
 
 **Phase 2 — resume from failure shipped (persist-and-resume flavor).** Sixth Phase-2 epic; three of four checkboxes on the "Resume from failure" block are ticked. Skipped "detect interrupted jobs on runner restart" — that belongs with the Phase-3 Inngest step-function rewrite. Chose the persist-and-resume slice over the full Inngest rewrite so we ship user-facing value without pulling in an external service; the persisted state (`job_batches`, `key_maps`) is exactly what Inngest would consume when we layer it on later.
 

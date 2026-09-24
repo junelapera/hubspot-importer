@@ -38,6 +38,6 @@
 - [x] Preview + validation parity with CSV path (same `{name, headers, preview, rows, totalRows, parseWarnings, validationWarnings}` shape; `SchemaInferPanel` / mapping wizard / dry run / execute all work unchanged)
 
 ## Google Sheets source
-- [ ] OAuth flow for Google Sheets read access
-- [ ] Sheet picker UI
-- [ ] Refresh-from-sheet action for saved mappings
+- [x] Ingest from Published-to-web CSV URLs (`lib/source/gsheets.ts::normalizeGoogleSheetsUrl` accepts `/pub?output=csv`, `/pubhtml`, `/edit#gid=…`, bare sheet URLs, and gviz CSV export; rewrites where safe. `POST /api/sources/gsheets` server-side-fetches each URL with a 30s timeout + 20 MB cap, HTML→502 guard, and pipes through `parseCsv`. `SourceUploader` gains a fourth "Google Sheets" tab with a dynamic list of `{tableName, url}` rows)
+- [ ] OAuth flow for private-sheet read access (deferred — needs a GCP project + consent screen. The Published-CSV path covers the common case; upgrade when someone hits the "can't publish this sheet" ceiling)
+- [ ] Refresh-from-sheet action for saved mappings (needs to store the sheet URL alongside the mapping profile, then a "re-fetch" button on `/import` that re-runs the gsheets endpoint)

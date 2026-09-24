@@ -45,7 +45,7 @@ type ParseResponse = {
   kind?: string;
 };
 
-type Mode = "csv" | "xlsx" | "json";
+type Mode = "csv" | "xlsx" | "json" | "gsheets";
 type SubmitState =
   | { kind: "idle" }
   | { kind: "submitting" }
@@ -80,6 +80,10 @@ export function SourceUploader({ portals }: { portals: PortalSummary[] }) {
   // Cleared whenever sources/mappings change (either edit or profile load)
   // so ExecutePanel can gate on a fresh dry run.
   const [dryRunSignature, setDryRunSignature] = useState<string | null>(null);
+  // gsheets tab: dynamic list of {tableName, url} pairs. Start with one row.
+  const [gsheetRows, setGsheetRows] = useState<{ tableName: string; url: string }[]>([
+    { tableName: "", url: "" },
+  ]);
 
   // Auto-load the linked mapping profile on resume so the wizard is
   // pre-configured before the user re-uploads sources.
@@ -193,6 +197,34 @@ export function SourceUploader({ portals }: { portals: PortalSummary[] }) {
     }
   }
 
+  async function submitGsheets(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    const cleanedRows = gsheetRows
+      .map((r) => ({ tableName: r.tableName.trim(), url: r.url.trim() }))
+      .filter((r) => r.tableName || r.url);
+    if (cleanedRows.length === 0) {
+      setState({ kind: "error", message: "add at least one table name + URL pair" });
+      return;
+    }
+    setState({ kind: "submitting" });
+    try {
+      const res = await fetch("/api/sources/gsheets", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sources: cleanedRows }),
+      });
+      const payload = (await res.json()) as ParseResponse;
+      if (!res.ok) {
+        setState({ kind: "error", message: payload.error ?? `HTTP ${res.status}` });
+        return;
+      }
+      setState({ kind: "success", response: payload });
+      setDryRunSignature(null);
+    } catch (err) {
+      setState({ kind: "error", message: (err as Error).message });
+    }
+  }
+
   async function submitJson(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setState({ kind: "submitting" });
@@ -287,6 +319,9 @@ export function SourceUploader({ portals }: { portals: PortalSummary[] }) {
           </ModeTab>
           <ModeTab active={mode === "json"} onClick={() => setMode("json")}>
             JSON paste
+          </ModeTab>
+          <ModeTab active={mode === "gsheets"} onClick={() => setMode("gsheets")}>
+            Google Sheets
           </ModeTab>
         </div>
 
@@ -402,6 +437,76 @@ export function SourceUploader({ portals }: { portals: PortalSummary[] }) {
             <div className="flex items-center gap-3">
               <Button type="submit" disabled={disabled}>
                 {state.kind === "submitting" ? "Parsing…" : "Parse XLSX"}
+              </Button>
+              {state.kind === "error" ? (
+                <p className="text-sm text-destructive">
+                  {state.message}
+                  {state.extra ? ` (${state.extra})` : ""}
+                </p>
+              ) : null}
+            </div>
+          </form>
+        ) : mode === "gsheets" ? (
+          <form onSubmit={submitGsheets} className="space-y-4 rounded-md border border-border p-4">
+            <div className="space-y-1 text-sm">
+              <p className="font-medium">Published Google Sheets URLs</p>
+              <p className="text-xs text-muted-foreground">
+                In each sheet, use <em>File → Share → Publish to web</em>, pick the sheet tab you want, choose the{" "}
+                <strong>CSV</strong> format, and paste the URL below. One URL per HubDB table. The sheet stays
+                private; only rows visible in the published tab are fetched.
+              </p>
+            </div>
+
+            <div className="space-y-3">
+              {gsheetRows.map((row, i) => (
+                <div key={i} className="grid gap-2 sm:grid-cols-[minmax(0,10rem)_minmax(0,1fr)_auto]">
+                  <input
+                    type="text"
+                    value={row.tableName}
+                    onChange={(e) => {
+                      const next = e.target.value;
+                      setGsheetRows((prev) => prev.map((r, idx) => (idx === i ? { ...r, tableName: next } : r)));
+                    }}
+                    disabled={disabled}
+                    placeholder={i === 0 ? "table name (e.g. brands)" : "table name"}
+                    className="h-9 rounded-md border border-input bg-background px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/50"
+                  />
+                  <input
+                    type="url"
+                    value={row.url}
+                    onChange={(e) => {
+                      const next = e.target.value;
+                      setGsheetRows((prev) => prev.map((r, idx) => (idx === i ? { ...r, url: next } : r)));
+                    }}
+                    disabled={disabled}
+                    placeholder="https://docs.google.com/spreadsheets/d/e/…/pub?output=csv&gid=…"
+                    className="h-9 rounded-md border border-input bg-background px-3 font-mono text-xs outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/50"
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={disabled || gsheetRows.length === 1}
+                    onClick={() => setGsheetRows((prev) => prev.filter((_, idx) => idx !== i))}
+                  >
+                    Remove
+                  </Button>
+                </div>
+              ))}
+            </div>
+
+            <div className="flex items-center gap-3">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={disabled}
+                onClick={() => setGsheetRows((prev) => [...prev, { tableName: "", url: "" }])}
+              >
+                Add another sheet
+              </Button>
+              <Button type="submit" disabled={disabled}>
+                {state.kind === "submitting" ? "Fetching…" : "Fetch sheets"}
               </Button>
               {state.kind === "error" ? (
                 <p className="text-sm text-destructive">

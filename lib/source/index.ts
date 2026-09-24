@@ -7,6 +7,9 @@ export type { JsonParseError, JsonParseOutcome, JsonParseResult, JsonTable } fro
 export { parseXlsx, XlsxParseError } from "./xlsx";
 export type { XlsxParseOptions, XlsxParseResult, XlsxSheetResult } from "./xlsx";
 
+export { normalizeGoogleSheetsUrl, GoogleSheetsUrlError } from "./gsheets";
+export type { NormalizedGoogleSheetsUrl } from "./gsheets";
+
 export {
   validateSource,
   HUBDB_TEXT_MAX,
