@@ -14,7 +14,10 @@ import { createServerClient, type CookieOptions } from "@supabase/ssr";
 // Renamed from middleware.ts → proxy.ts in Next 16 per the framework's
 // naming migration.
 
-const PUBLIC_PREFIXES = ["/login", "/register", "/api/auth/", "/favicon"];
+// Public paths: auth routes + Next's built-in icon conventions (favicon.ico,
+// icon.png, apple-icon.png, etc.) so the browser tab icon renders on the
+// login screen instead of getting redirected to itself.
+const PUBLIC_PREFIXES = ["/login", "/register", "/api/auth/", "/favicon", "/icon", "/apple-icon"];
 
 function isPublicPath(pathname: string): boolean {
   return PUBLIC_PREFIXES.some((p) => pathname.startsWith(p));

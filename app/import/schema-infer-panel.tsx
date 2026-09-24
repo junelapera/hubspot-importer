@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Select,
   SelectContent,
@@ -274,8 +275,8 @@ function ColumnRow({
       </td>
       <td className="px-3 py-2">
         <label className="inline-flex items-center gap-1.5">
-          <input
-            type="checkbox"
+          <Checkbox
+            className="size-3.5"
             checked={isNk}
             onChange={onToggleNaturalKey}
             disabled={isFk}

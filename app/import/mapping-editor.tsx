@@ -9,6 +9,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   autoMap,
   countResolvable,
@@ -255,9 +256,9 @@ export function MappingEditor({
                       </td>
                       <td className="px-3 py-2">
                         {assignment.kind === "mapped" ? (
-                          <label className="inline-flex items-center gap-1">
-                            <input
-                              type="checkbox"
+                          <label className="inline-flex items-center gap-1.5">
+                            <Checkbox
+                              className="size-3.5"
                               checked={value.naturalKey.includes(h)}
                               onChange={() => toggleNaturalKey(h)}
                             />

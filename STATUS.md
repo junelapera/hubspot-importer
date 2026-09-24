@@ -2,7 +2,15 @@
 
 Running log of where the HubDB Importer project is, what's in flight, and what's next. Update as we go.
 
-## Current state — 2026-09-27 (morning)
+## Current state — 2026-09-27 (mid-morning)
+
+**S2-branded Checkbox component + rolled out to the two mapping-table sites.** Small UI polish — the naturalKey toggles on the products/brands/categories mapping card (`mapping-editor.tsx`) and the schema-inference panel (`schema-infer-panel.tsx`) used bare native `<input type="checkbox">` with browser-default styling, which looked out of place next to the S2-branded shadcn Buttons + Selects. New `components/ui/checkbox.tsx` (5th shadcn/Base UI primitive alongside `button`, `select`, `tutorial-panel`) uses a native input under the hood (accessibility for free — keyboard nav, screen readers, form participation) with `appearance-none` to strip browser styling and a custom inline-SVG check mark. Checked state: brand-ochre fill (`bg-primary`) + white check; unchecked: `border-input` + `bg-background`; focus-visible ring matches the other primitives; disabled state has the standard `opacity-50 cursor-not-allowed`. Both call sites use `size-3.5` (14px) for tight table-row fit. Component wraps a native `<input>` in a `forwardRef` with `Omit<InputHTMLAttributes, "type">` so consumers get everything except the ability to change the type — the "checkbox" type is baked in.
+
+**Files touched:** `components/ui/checkbox.tsx` (new), `app/import/mapping-editor.tsx` (import + swap), `app/import/schema-infer-panel.tsx` (import + swap), `CLAUDE.md` (components list). 255 vitest cases still green, tsc + lint clean
+
+---
+
+## Prior state — 2026-09-27 (morning)
 
 **Basic Auth removed — Supabase Auth is the only gate.** Follow-up to the auth-system ship earlier this morning: the legacy Basic Auth fallback was pulled out entirely once the Supabase Auth flow was verified working end-to-end (register + login + logout + sidebar user chip). Rationale: coexistence adds branching in `proxy.ts`, two paths to keep working, and env-var mode-selection foot-guns. Since the app is Saltedstone-internal and there's only one active deployer (the user), a clean cut is safer than dragging the fallback forever. `proxy.ts` is now ~60 lines shorter and single-purpose; `BASIC_AUTH_USER` + `BASIC_AUTH_PASSWORD` env vars removed from `.env.example` + Vercel setup docs. Migration for anyone still on Basic Auth: register a first user via `/register` on their deployed URL, then delete the Basic Auth env vars in Vercel + redeploy.
 
