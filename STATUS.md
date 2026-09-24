@@ -2,7 +2,40 @@
 
 Running log of where the HubDB Importer project is, what's in flight, and what's next. Update as we go.
 
-## Current state — 2026-09-26 (late evening)
+## Current state — 2026-09-26 (night)
+
+**Wizard-state persistence shipped — sessionStorage-backed, per-portal.** Closes the state-loss round-trip pain point the smoke test surfaced: navigating to `/portals/[id]/schema` to provision tables and back to `/import` used to drop everything (parsed sources gone, mapping cards not rendered, needed a full re-upload + re-config). Now the mapping config survives across nav within the tab; only raw parsed rows need re-fetching (one click).
+
+1. **`SourceUploader` sessionStorage integration** (`app/import/source-uploader.tsx`) — persists `mode` + `mappings` + `selectedProfileId` + `gsheetRows` to `sessionStorage` under `hubdb-importer:wizard:{portalId}` on every state change. Hydrates on mount client-side. `SessionState` type + `sessionKey(portalId)` helper co-located at the top of the file. Resume flow (`?resume=<jobId>` in URL) takes precedence — the profile-linked mapping load beats last session's state so users who deep-link into a resume don't get their previous work stomped
+2. **Restored-mappings banner** — a compact primary-colored card that appears when `state.kind === "idle"` (no parsed sources yet) but `mappings` has content (rehydrated from the last session). Text: "Restored N mapping(s) from your last session on this portal · Re-fetch or re-upload your source files below — the mapping config is already filled in and will attach automatically." **Clear session** button on the right — empties the wizard state and removes the sessionStorage key
+3. **Phase-2.md**: new "Wizard state persistence" block with the checkbox ticked and design rationale in the description
+
+**Files touched:** `app/import/source-uploader.tsx` (~+60 lines: `SessionState` type + `sessionKey` helper + `hydratedRef` + hydration effect + persist effect + `clearSession` handler + banner JSX + `useRef` import), `phases/phase-2.md` (new block). 247 vitest cases / 18 suites still green, tsc + lint clean
+
+**Design decisions worth remembering (captured in-code as comments too):**
+- **`useRef` for the hydration gate, not `useState`.** Would have tripped ESLint's `react-hooks/set-state-in-effect` rule on the mount-signal setter. Hydration is one-shot; we don't need a re-render to signal completion because the banner condition (`Object.keys(mappings).length > 0`) is a natural derived signal — if mappings has content, hydration already ran
+- **Persist effect skips empty payloads and `removeItem`s the key instead of writing defaults.** Protects against the effect-ordering edge case where React runs both effects in sequence within a single commit: hydration effect (declared first) reads sessionStorage and calls `setMappings(saved)`, but the persist effect (declared second) fires in the same commit with the CLOSURE still holding the render-time defaults (`{}`). If persist wrote unconditionally, it would briefly overwrite sessionStorage with `{}` before the state update commits and re-fires persist with hydrated values. Skipping empty writes turns that failure mode into a no-op. Also means "Clear session" (which resets state to defaults) naturally removes the key — one action does both
+- **Raw parsed rows NOT persisted.** sessionStorage has a ~5 MB per-origin cap (browser-dependent, some go lower). A 10k-row CSV with wide columns can easily blow that out and cause a silent `setItem` throw. Persisting only lightweight config (mappings, mode, profile id, gsheet URLs — all short strings) keeps well under the cap regardless of dataset size. Re-parsing on return is cheap (single click, sub-second for typical files) and the config was the expensive-to-recreate thing anyway
+- **`sessionStorage` over `localStorage`.** Auto-clears when the tab closes — a natural boundary that avoids "week-old parse lingers in weird ways" bugs. If someone wants durability across sessions they should save a mapping profile (that already exists)
+- **Per-portal key prefix.** `hubdb-importer:wizard:{portalId}` — switching portals in the picker doesn't cross-contaminate mapping state that references portal-specific target table names. If a user works on portal A, then portal B, then back to A, each gets its own hydrated slice
+- **Targeted `eslint-disable react-hooks/set-state-in-effect`** on the hydration effect's setter block, with a comment explaining why (legit external-store sync, `useSyncExternalStore` overkill here). Doesn't disable the rule anywhere else
+
+**Still open on `phases/phase-2.md`:**
+- OAuth flow for private Google Sheets (deferred)
+- Refresh-from-sheet action for saved mappings
+- Full cycle handling — two-phase write for cyclic FK graphs, self-reference end-to-end
+- F11 tail — re-run saved mapping against a different portal
+- Detect interrupted jobs on runner restart (Phase 3 with Inngest)
+- (Provision-writes-back-tableId — Phase-1 F3 polish carried over)
+
+**Next up (unblocked):**
+- **Inngest step-function rewrite** — the last "MVP → production scale" unlock; unlocks tab-close-safe durability
+- **Refresh-from-sheet** — small QoL win now that gsheets is proven; needs `mappings.state_json` to carry the URL
+- **Persist last-parsed-source *metadata* (filenames / URLs, not rows)** — natural extension of the sessionStorage work; would let the banner auto-suggest what to re-fetch. ~15 min, if the current UX turns out to still leave users hunting for what they had loaded before
+
+---
+
+## Prior state — 2026-09-26 (late evening)
 
 **Google Sheets sandbox smoke test passed — three real bugs surfaced and fixed, plus non-dev tutorials added on `/import` + schema-planner.** End-to-end validation of the gsheets shipment against the real HubSpot sandbox turned into a productive session: the smoke test itself worked, but the *content* of the test data (numeric price column + FK columns) exposed three actual bugs, all now shipped fixes for. Then rolled out inline tutorials so non-dev users can self-serve the wizard without hunting through `/docs`.
 

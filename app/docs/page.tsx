@@ -547,6 +547,16 @@ export default function DocsPage() {
             display as selected but never committed to state. Re-save the
             profile to overwrite.
           </li>
+          <li>
+            <strong>Mapping cards missing after navigating back to Import</strong>{" "}
+            — parsed source rows aren&apos;t persisted (they can be too
+            large for browser storage), but your mapping config <em>is</em>{" "}
+            preserved per portal in the browser tab. Look for the blue{" "}
+            <em>&quot;Restored N mapping(s) from your last session&quot;</em>{" "}
+            banner and just re-upload / re-fetch your sources — the config
+            re-attaches automatically. Close the tab or click{" "}
+            <em>Clear session</em> in the banner to reset.
+          </li>
         </ul>
       </Section>
 
