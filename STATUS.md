@@ -2,7 +2,20 @@
 
 Running log of where the HubDB Importer project is, what's in flight, and what's next. Update as we go.
 
-## Current state — 2026-09-25 (afternoon)
+## Current state — 2026-09-25 (evening)
+
+**Fix — Base UI Select trigger showed raw value instead of the item's label.** The Target portal picker read as a raw uuid (`a2c22af5-51c8-4e59-90fc-7fd77be062f2`) instead of the human name; same class of bug affected any Select whose `<SelectItem>` had mixed JSX children (e.g. `{p.label} · {p.env}` or `{t.name} ({t.name})`). Base UI's `Select.Value` shows `Select.Item.label` when set, else falls back to stringifying `value` — plain-string children happen to auto-populate `label`, but as soon as children contain expressions the auto-derive breaks.
+
+**Fix in `components/ui/select.tsx`** — added a `deriveItemLabel(children)` helper that walks the React children tree (strings, numbers, arrays, and one level into element `props.children`) and collects a plain-string label. `SelectItem` wrapper now sets `label={label ?? deriveItemLabel(children)}` on the primitive, and accepts an explicit `label` prop as an escape hatch for cases with icons / non-string content the walker can't flatten. Every existing call site works without changes: id-valued items now show their friendly names in the trigger; simple string-children items are unchanged
+
+**Files touched:** `components/ui/select.tsx`. 224 vitest cases still green, tsc + lint clean
+
+**Design decision worth remembering:**
+- **Fixed in the shadcn wrapper, not per-call-site.** Alternative was to sweep every `<SelectItem>` and add `label={`${p.label} · ${p.env}`}` alongside children — dozens of edits, easy to forget on a new dropdown. Deriving the label once in the wrapper means new code just writes the natural JSX and it works. The `label` prop remains available as an override for the rare complex-children case (icons, badges) where the walker can't produce a clean string
+
+---
+
+## Prior state — 2026-09-25 (afternoon)
 
 **Form-control height alignment pass.** After the shadcn Select rollout every form control had slightly different metrics — buttons + selects were `h-7` (28px, from `size="sm"`), text inputs sat around 40px (ad-hoc `py-2 text-sm`), and `<input type="number">` was taller still because WebKit's spinner controls add invisible padding. All standardized on **h-9 (36px)** — a common form-control height that reads comfortably next to Hanken Grotesk body copy without feeling bulky.
 
