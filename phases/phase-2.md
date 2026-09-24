@@ -37,6 +37,9 @@
 - [x] Sheet-per-table detection (`lib/source/xlsx.ts::parseXlsx` uses SheetJS; each sheet becomes an independent table. Single-sheet workbooks use the filename as table name; multi-sheet workbooks combine as `filename__sheetname`)
 - [x] Preview + validation parity with CSV path (same `{name, headers, preview, rows, totalRows, parseWarnings, validationWarnings}` shape; `SchemaInferPanel` / mapping wizard / dry run / execute all work unchanged)
 
+## Wizard state persistence
+- [x] Persist wizard state across nav (`app/import/source-uploader.tsx` — mode + mappings + selectedProfileId + gsheetRows saved to `sessionStorage` under `hubdb-importer:wizard:{portalId}` on every change; hydrated on mount client-side; resume flow takes precedence. Raw parsed rows intentionally NOT persisted — sessionStorage's ~5 MB cap can't hold a 10k-row CSV, and re-parsing is one click. Blue "Restored N mapping(s)" banner + "Clear session" button appear when the user returns and mappings were rehydrated but no source is parsed yet)
+
 ## Google Sheets source
 - [x] Ingest from Published-to-web CSV URLs (`lib/source/gsheets.ts::normalizeGoogleSheetsUrl` accepts `/pub?output=csv`, `/pubhtml`, `/edit#gid=…`, bare sheet URLs, and gviz CSV export; rewrites where safe. `POST /api/sources/gsheets` server-side-fetches each URL with a 30s timeout + 20 MB cap, HTML→502 guard, and pipes through `parseCsv`. `SourceUploader` gains a fourth "Google Sheets" tab with a dynamic list of `{tableName, url}` rows)
 - [ ] OAuth flow for private-sheet read access (deferred — needs a GCP project + consent screen. The Published-CSV path covers the common case; upgrade when someone hits the "can't publish this sheet" ceiling)

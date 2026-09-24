@@ -1,6 +1,6 @@
 "use client";
 
-import { startTransition, useEffect, useState, type FormEvent } from "react";
+import { startTransition, useEffect, useRef, useState, type FormEvent } from "react";
 import { useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import type { PortalSummary } from "@/lib/db/portals";
@@ -47,6 +47,18 @@ type ParseResponse = {
 };
 
 type Mode = "csv" | "xlsx" | "json" | "gsheets";
+
+type SessionState = {
+  mode?: Mode;
+  mappings?: Record<string, MappingState>;
+  selectedProfileId?: string | null;
+  gsheetRows?: { tableName: string; url: string }[];
+};
+
+const SESSION_KEY_PREFIX = "hubdb-importer:wizard:";
+function sessionKey(portalId: string) {
+  return `${SESSION_KEY_PREFIX}${portalId}`;
+}
 type SubmitState =
   | { kind: "idle" }
   | { kind: "submitting" }
@@ -85,6 +97,15 @@ export function SourceUploader({ portals }: { portals: PortalSummary[] }) {
   const [gsheetRows, setGsheetRows] = useState<{ tableName: string; url: string }[]>([
     { tableName: "", url: "" },
   ]);
+  // sessionStorage-backed wizard state. Persist mode + mappings +
+  // selectedProfileId + gsheetRows so navigating to /portals/[id]/schema and
+  // back doesn't drop everything. Raw parsed rows are NOT persisted (too big
+  // for the ~5 MB sessionStorage cap) — user re-parses on return; the
+  // mapping config (the expensive-to-recreate thing) survives.
+  // Ref, not state — setting state in the hydration effect would trip the
+  // react-hooks/set-state-in-effect lint rule. Hydration is a one-shot
+  // gate; we don't need a re-render when it completes.
+  const hydratedRef = useRef(false);
 
   // Auto-load the linked mapping profile on resume so the wizard is
   // pre-configured before the user re-uploads sources.
@@ -113,6 +134,78 @@ export function SourceUploader({ portals }: { portals: PortalSummary[] }) {
       cancelled = true;
     };
   }, [resumeJobId, resumeMappingId]);
+
+  // Hydrate from sessionStorage on mount. Resume flow takes precedence — if
+  // the user landed here via /jobs/[id] Resume, we honor that mapping load
+  // instead of last session's state.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (!portalId) return;
+    if (hydratedRef.current) return;
+    hydratedRef.current = true;
+    if (resumeJobId) return;
+    try {
+      const raw = window.sessionStorage.getItem(sessionKey(portalId));
+      if (!raw) return;
+      const saved = JSON.parse(raw) as SessionState;
+      // Legit external-source hydration — the react-hooks/set-state-in-effect
+      // lint rule is a warning about avoidable cascading renders, not about
+      // one-shot mount-time syncs from client-only storage. React docs OK
+      // this pattern (alternative would be useSyncExternalStore, overkill here).
+      /* eslint-disable react-hooks/set-state-in-effect */
+      if (saved.mode === "csv" || saved.mode === "xlsx" || saved.mode === "json" || saved.mode === "gsheets") {
+        setMode(saved.mode);
+      }
+      if (saved.mappings && typeof saved.mappings === "object") {
+        setMappings(saved.mappings as Record<string, MappingState>);
+      }
+      if (typeof saved.selectedProfileId === "string" || saved.selectedProfileId === null) {
+        setSelectedProfileId(saved.selectedProfileId);
+      }
+      if (Array.isArray(saved.gsheetRows) && saved.gsheetRows.length > 0) {
+        setGsheetRows(saved.gsheetRows);
+      }
+      /* eslint-enable react-hooks/set-state-in-effect */
+    } catch {
+      // ignore parse errors — treat as no saved state
+    }
+  }, [portalId, resumeJobId]);
+
+  // Persist on any change once hydrated. Skip empty payloads (initial-mount
+  // render, where state is at defaults) — otherwise the persist effect fires
+  // before hydration has committed the loaded state and briefly overwrites
+  // saved data with defaults. Empty state removes the key instead, so the
+  // "Clear session" flow (which sets everything back to defaults) works.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (!hydratedRef.current || !portalId) return;
+    const hasContent =
+      Object.keys(mappings).length > 0 ||
+      selectedProfileId !== null ||
+      gsheetRows.some((r) => r.tableName || r.url);
+    try {
+      if (hasContent) {
+        const payload: SessionState = { mode, mappings, selectedProfileId, gsheetRows };
+        window.sessionStorage.setItem(sessionKey(portalId), JSON.stringify(payload));
+      } else {
+        window.sessionStorage.removeItem(sessionKey(portalId));
+      }
+    } catch {
+      // sessionStorage might be full or disabled — silently skip
+    }
+  }, [portalId, mode, mappings, selectedProfileId, gsheetRows]);
+
+  function clearSession() {
+    if (typeof window === "undefined" || !portalId) return;
+    try {
+      window.sessionStorage.removeItem(sessionKey(portalId));
+    } catch {}
+    setMappings({});
+    setSelectedProfileId(null);
+    setGsheetRows([{ tableName: "", url: "" }]);
+    setDryRunSignature(null);
+    setState({ kind: "idle" });
+  }
 
   useEffect(() => {
     if (!portalId) return;
@@ -269,6 +362,22 @@ export function SourceUploader({ portals }: { portals: PortalSummary[] }) {
                   ? `Could not load the linked mapping profile: ${resumeError}. You can still re-configure the mapping by hand — the resume job id will still be used on Execute.`
                   : null}
           </p>
+        </section>
+      ) : null}
+
+      {!resumeJobId && state.kind === "idle" && Object.keys(mappings).length > 0 ? (
+        <section className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-primary/40 bg-primary/5 p-3 text-sm">
+          <div className="space-y-0.5">
+            <p className="font-medium">
+              Restored {Object.keys(mappings).length} mapping{Object.keys(mappings).length === 1 ? "" : "s"} from your last session on this portal
+            </p>
+            <p className="text-xs text-muted-foreground">
+              Re-fetch or re-upload your source files below — the mapping config is already filled in and will attach automatically.
+            </p>
+          </div>
+          <Button type="button" variant="outline" size="sm" onClick={clearSession}>
+            Clear session
+          </Button>
         </section>
       ) : null}
 
