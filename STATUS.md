@@ -2,7 +2,54 @@
 
 Running log of where the HubDB Importer project is, what's in flight, and what's next. Update as we go.
 
-## Current state — 2026-09-23 (afternoon)
+## Current state — 2026-09-24 (afternoon)
+
+**Saltedstone brand pass — palette + typography + wordmark + icons.** No functional changes; UI-only reskin so the app looks like it belongs to S2 rather than default shadcn.
+
+1. **Brand palette in `app/globals.css`** — full 24-token Saltedstone palette exposed as `--color-brand-*` CSS variables at `:root` (ochre / forest / coffee / purple / olive / burgundy / navy / chestnut / lilac / yellow / grass / red / blue / thistle / butter / mint / salmon / sky / sand / cream / offwhite / slate). Every existing shadcn token (`--primary`, `--background`, `--foreground`, `--muted`, `--accent`, `--destructive`, `--border`, `--ring`, `--sidebar-*`, `--chart-1..5`) remapped onto them so every existing component reskins for free — light mode: offwhite bg + forest text + ochre primary + yellow accent; dark mode: forest bg + offwhite text (same ochre primary + yellow accent). Cards get a lighter offwhite shade (`#f8f4ea`) for surface contrast; sidebar drops one step (`#eae4d5`) so chrome reads distinct
+2. **Hanken Grotesk swapped in for Geist** as the app font — `next/font/google` loads `Hanken_Grotesk` with `variable: "--font-hanken-sans"`; `globals.css`'s `--font-sans` + `--font-heading` both point at it; Geist Mono kept for `<code>` blocks. SIL OFL 1.1 license — free for any use
+3. **Saltedstone favicon + wordmark** — `favicon-32x32.png` from `saltedstone.com/hubfs/favicomatic/` fetched to `app/icon.png` (Next 16 auto-detects and injects `<link rel="icon">`); default Next scaffold `favicon.ico` removed so it doesn't compete. Full `saltedstone-2025.svg` wordmark fetched to `public/saltedstone-logo.svg` and rendered in the sidebar header at 24px tall with `dark:invert` so it flips forest → offwhite on the dark forest bg
+4. **Nav icons swapped to Saltedstone S2 SVG set** — four icons pulled to `public/icons/`: `laptop.svg` (Home), `compensation.svg` (Portals), `hubspot-expertise.svg` (Import), `custom-solutions.svg` (Jobs). Rendered as `<span>` with CSS `mask-image` + `bg-current` in both `Sidebar` and `MobileNav` so the flat-`#1D2923` glyphs inherit the nav item's current text color — no per-mode filter juggling; icon flips forest ↔ offwhite between inactive/active states and between light/dark modes automatically. `lucide-react` imports dropped from `nav.tsx` (dep still installed for anywhere else)
+5. **App title tweaked** — sidebar header + home hero h1 + `<title>` metadata all say "S2 HubDB Importer" (rebrand from bare "HubDB Importer"). Phase-1-MVP tag still sits above the title in both spots
+
+**Files touched:** `app/globals.css` (palette + font var swap), `app/layout.tsx` (Hanken import + wordmark), `app/nav.tsx` (logo, icons, S2 title), `app/page.tsx` (S2 title), plus new assets: `app/icon.png`, `public/saltedstone-logo.svg`, `public/icons/{laptop,compensation,hubspot-expertise,custom-solutions}.svg`. Removed: `app/favicon.ico`. 203 vitest cases still green (UI-only change), tsc + lint clean
+
+**Design decisions worth remembering:**
+- **`--color-brand-*` at `:root`, shadcn tokens as aliases.** Split so the palette stays browsable / documentable in one block and shadcn-consumers keep working via existing `bg-primary` / `text-muted-foreground` / etc. New code that wants a specific brand shade reaches directly for `bg-[var(--color-brand-lilac)]` — no Tailwind config edit needed
+- **CSS mask-image + `bg-current` for the icon set, not `<img>` + `dark:invert`.** The invert trick works for the wordmark but breaks on nav items where the active state also flips the text color (forest → offwhite on active). Mask trick makes the icon inherit whatever color the surrounding text has, so it's correct in all four combinations (light/dark × active/inactive) without any state-specific CSS
+- **Card + sidebar shades hand-picked, not palette-drawn.** `#f8f4ea` (card) and `#eae4d5` (sidebar) are one step off offwhite in either direction — the palette doesn't include either. Keeps card/sidebar readably distinct from the main background without introducing a whole new hue
+
+---
+
+## Prior state — 2026-09-24 (morning)
+
+**Phase 2 kickoff — mapping profile duplicate / export / import shipped.** Three F11 checkboxes ticked in one pass; 203 vitest cases (+11 net-new) still green, tsc + lint clean.
+
+1. **`lib/mapping-profile.ts` (new)** — pure module. Exports a versioned envelope (`kind: "hubdb-importer-mapping-profile"`, `version: 1`, `name`, optional `exportedAt`, `state`) plus `serializeProfileExport`, `parseProfileExport` (zod-validated; envelope only — state is `passthrough()` so we don't re-validate deeply here, wizard/executor already do that at load time), and `nextCopyName(base, existing)` (`Copy of X`, then `Copy of X (2)`, `(3)`… — predictable, no fancy re-parsing when the base is itself a copy). 11 vitest cases covering serialize round-trip, envelope rejects (wrong kind / wrong version / empty name / empty state / garbage null / string / `{}`), backward-compat when `exportedAt` is omitted, and `nextCopyName` collision walks
+2. **`duplicateMapping(client, id)` in `lib/db/mappings.ts`** — server-side helper: fetches the source profile (throws new `MappingNotFoundError` if gone), lists the portal's siblings, feeds names into `nextCopyName`, inserts. State JSONB is cloned verbatim so the copy is an exact snapshot. `MappingNotFoundError` exported from the repo module
+3. **`POST /api/mappings/[id]/duplicate` (new route)** — thin wrapper: 404 on `MappingNotFoundError`, 409 on `DuplicateMappingNameError` (shouldn't happen post-`nextCopyName` but safe fallback), 201 with new profile on success
+4. **`ProfilePanel` UI** — new actions row under the existing 2-col load/save grid: **Duplicate** (needs selection, hits the new endpoint, auto-selects the copy), **Export JSON** (client-side blob download named `{slug}.hubdb-profile.json`), **Import JSON…** (hidden `<input type="file">`, reads text → `parseProfileExport` → POST to `/api/portals/[id]/mappings`; if the profile name collides on the target portal, auto-renames via `nextCopyName` and surfaces the rename in the status message so the user knows it happened). Single `busy` state serializes the three actions so no double-click can fire two mutations in flight
+
+**Files touched:** `lib/mapping-profile.ts` (new), `lib/mapping-profile.test.ts` (new), `lib/db/mappings.ts`, `app/api/mappings/[id]/duplicate/route.ts` (new), `app/import/profile-panel.tsx`. Phase-2 checklist updated
+
+**Design decisions worth remembering:**
+- **Envelope, not raw state.** Exports carry `kind` + `version` so we can (a) detect a paste of raw wizard state vs. a real export, and (b) grow the wire shape later with a migration step in `parseProfileExport`. Cost: two extra keys on disk. Value: unambiguous on ingest
+- **State shape validated shallowly on import.** `parseProfileExport` uses `passthrough()` for each source-table entry so we don't re-encode `MappingState`'s deep zod schema in two places. If someone hand-crafts a broken state, they'll see the failure the moment the wizard or executor touches it — same failure mode as any other in-memory edit
+- **Duplicate + Import both use `nextCopyName`.** Server-side helper for duplicate (needs a DB read anyway to fetch the source), client-side for import (already have the full profile list in state). Same collision walk, same predictable output
+- **Rename on import is silent-with-notice, not a modal.** Prompting the user for a new name mid-upload would gate an already-committed action. Auto-suffix + a clear status message ("Imported as X (renamed from Y — a profile by that name already exists)") is friendlier and one less click
+
+**Still open on `phases/phase-2.md`** (F11 tail):
+- Re-run saved mapping against a new file (mostly a UX flow — profile is already loadable; needs the wizard to accept "load profile first, then upload matching sources")
+- Re-run saved mapping against a different portal (needs a portal picker in the load step + name→id resolution when the target portal has different table ids)
+
+**Next up (unblocked):**
+- Rest of Phase 2 — resume from failure (Inngest per `docs/long-job-runner.md`), schema inference from CSV, XLSX + Google Sheets sources, the two F11 re-run bullets above
+- Sandbox smoke test — export a real profile, edit the JSON, re-import into the same portal to see the auto-rename land
+- Deploy — manual Vercel step still pending
+
+---
+
+## Prior state — 2026-09-23 (afternoon)
 
 **Five follow-on tasks shipped in one pass**, after the morning's server-side hardening:
 

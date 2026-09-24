@@ -7,7 +7,7 @@ export default function Home() {
         <p className="text-xs uppercase tracking-wider text-muted-foreground">
           Phase 1 · MVP
         </p>
-        <h1 className="text-3xl font-semibold">HubDB Importer</h1>
+        <h1 className="text-3xl font-semibold">S2 HubDB Importer</h1>
         <p className="text-base leading-relaxed text-muted-foreground">
           Import relational data into HubSpot HubDB — resolves{" "}
           <code className="rounded bg-muted px-1.5 py-0.5 text-sm">FOREIGN_ID</code>{" "}

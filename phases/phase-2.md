@@ -3,10 +3,10 @@
 **Goal:** Make imports repeatable, resumable, and friendlier for wider source formats.
 
 ## F11 — Mapping profiles
-- [ ] Save named mapping profiles (create, list, rename)
-- [ ] Duplicate profile action
-- [ ] Export profile as JSON
-- [ ] Import profile from JSON
+- [x] Save named mapping profiles (create, list, rename) (Phase 1 — `lib/db/mappings.ts` + `ProfilePanel`)
+- [x] Duplicate profile action (`POST /api/mappings/[id]/duplicate` → server-side `duplicateMapping` picks a non-colliding `Copy of X` name via `nextCopyName`)
+- [x] Export profile as JSON (`serializeProfileExport` wraps in a versioned envelope; client-side blob download from `ProfilePanel`)
+- [x] Import profile from JSON (`parseProfileExport` zod-validates the envelope; auto-renames via `nextCopyName` when the incoming name collides on the target portal)
 - [ ] Re-run saved mapping against a new file
 - [ ] Re-run saved mapping against a different portal (lookup by name)
 

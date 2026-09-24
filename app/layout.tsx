@@ -1,10 +1,10 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import { Hanken_Grotesk, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { MobileNav, Sidebar } from "./nav";
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
+const hankenSans = Hanken_Grotesk({
+  variable: "--font-hanken-sans",
   subsets: ["latin"],
 });
 
@@ -14,7 +14,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "HubDB Importer",
+  title: "S2 HubDB Importer",
   description: "Import relational data into HubSpot HubDB with foreign-key resolution.",
 };
 
@@ -22,7 +22,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html
       lang="en"
-      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
+      className={`${hankenSans.variable} ${geistMono.variable} h-full antialiased`}
     >
       <body className="min-h-full flex">
         <Sidebar />

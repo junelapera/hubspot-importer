@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { MappingState } from "../mapping";
+import { nextCopyName } from "../mapping-profile";
 
 /**
  * A named wizard-state snapshot. `state` is `Record<sourceTableName,
@@ -118,4 +119,29 @@ export async function updateMapping(
 export async function deleteMapping(client: SupabaseClient, id: string): Promise<void> {
   const { error } = await client.from("mappings").delete().eq("id", id);
   if (error) throw new Error(`mappings.delete failed: ${error.message}`);
+}
+
+export class MappingNotFoundError extends Error {
+  constructor(id: string) {
+    super(`Profile ${id} not found`);
+    this.name = "MappingNotFoundError";
+  }
+}
+
+export async function duplicateMapping(
+  client: SupabaseClient,
+  id: string,
+): Promise<MappingProfile> {
+  const source = await getMappingById(client, id);
+  if (!source) throw new MappingNotFoundError(id);
+  const siblings = await listMappingsForPortal(client, source.portalId);
+  const name = nextCopyName(
+    source.name,
+    siblings.map((p) => p.name),
+  );
+  return createMapping(client, {
+    portalId: source.portalId,
+    name,
+    state: source.state,
+  });
 }
