@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { listRecentJobs } from "@/lib/db/jobs";
 import { createSupabaseServerClient } from "@/lib/db/supabase";
+import { PAGE_ACCENTS, PageHeader } from "@/components/ui/page-header";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -17,13 +18,17 @@ export default async function JobsPage() {
 
   return (
     <main className="mx-auto max-w-5xl space-y-6 p-6">
-      <header className="space-y-1">
-        <h1 className="text-xl font-semibold">Job history</h1>
-        <p className="text-sm text-muted-foreground">
-          Most recent 50 imports, dry runs, and publishes across all portals. Rows are written by{" "}
-          <code className="rounded bg-muted px-1">POST /api/portals/[id]/execute</code>.
-        </p>
-      </header>
+      <PageHeader
+        icon={PAGE_ACCENTS.jobs.icon}
+        accentColor={PAGE_ACCENTS.jobs.color}
+        title="Job history"
+        description={
+          <>
+            Most recent 50 imports, dry runs, and publishes across all portals. Rows are written by{" "}
+            <code className="rounded bg-muted px-1">POST /api/portals/[id]/execute</code>.
+          </>
+        }
+      />
 
       {loadError ? (
         <p className="rounded-md border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">

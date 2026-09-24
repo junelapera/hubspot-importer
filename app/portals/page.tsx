@@ -2,6 +2,7 @@ import Link from "next/link";
 import { listPortals } from "@/lib/db/portals";
 import { createSupabaseServerClient } from "@/lib/db/supabase";
 import { PortalForm } from "./portal-form";
+import { PAGE_ACCENTS, PageHeader } from "@/components/ui/page-header";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -18,14 +19,12 @@ export default async function PortalsPage() {
 
   return (
     <main className="mx-auto max-w-3xl px-6 py-12 space-y-10">
-      <header className="space-y-2">
-        <p className="text-xs uppercase tracking-wider text-muted-foreground">Phase 1 · F1</p>
-        <h1 className="text-2xl font-semibold">Portals</h1>
-        <p className="text-sm text-muted-foreground">
-          Connect a HubSpot portal by pasting its private-app token. Tokens are
-          encrypted at rest and never returned to the browser after save.
-        </p>
-      </header>
+      <PageHeader
+        icon={PAGE_ACCENTS.portals.icon}
+        accentColor={PAGE_ACCENTS.portals.color}
+        title="Portals"
+        description="Connect a HubSpot portal by pasting its private-app token. Tokens are encrypted at rest and never returned to the browser after save."
+      />
 
       {loadError ? (
         <section className="rounded-md border border-destructive/30 bg-destructive/10 p-4 text-sm">

@@ -14,17 +14,23 @@ type NavItem = {
   href: string;
   label: string;
   icon: string;
+  // Active-state background color from the S2 brand palette (defined in
+  // globals.css as --color-brand-*). Each nav item gets its own so the
+  // sidebar reads as a mini map of the app — Home = ochre (primary),
+  // Portals = purple (integrations), Import = grass (action / go),
+  // Jobs = burgundy (history), Docs = navy (informational).
+  activeBg: string;
   // A page belongs to a section if the pathname startsWith the href
   // (so /portals/[id]/schema highlights "Portals"). Home is exact-match.
   exact?: boolean;
 };
 
 const ITEMS: NavItem[] = [
-  { href: "/", label: "Home", icon: "/icons/laptop.svg", exact: true },
-  { href: "/portals", label: "Portals", icon: "/icons/compensation.svg" },
-  { href: "/import", label: "Import", icon: "/icons/hubspot-expertise.svg" },
-  { href: "/jobs", label: "Jobs", icon: "/icons/custom-solutions.svg" },
-  { href: "/docs", label: "Docs", icon: "/icons/team-building.svg" },
+  { href: "/", label: "Home", icon: "/icons/laptop.svg", exact: true, activeBg: "var(--color-brand-ochre)" },
+  { href: "/portals", label: "Portals", icon: "/icons/compensation.svg", activeBg: "var(--color-brand-purple)" },
+  { href: "/import", label: "Import", icon: "/icons/hubspot-expertise.svg", activeBg: "var(--color-brand-grass)" },
+  { href: "/jobs", label: "Jobs", icon: "/icons/custom-solutions.svg", activeBg: "var(--color-brand-burgundy)" },
+  { href: "/docs", label: "Docs", icon: "/icons/team-building.svg", activeBg: "var(--color-brand-navy)" },
 ];
 
 // CSS mask lets the flat-colored Saltedstone SVGs inherit `currentColor`
@@ -63,10 +69,7 @@ export function Sidebar({ userEmail }: { userEmail?: string | null }) {
           alt="Saltedstone"
           className="h-6 w-auto dark:invert"
         />
-        <div className="space-y-1">
-          <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Phase 1 · MVP</p>
-          <p className="text-sm font-semibold">S2 HubDB Importer</p>
-        </div>
+        <p className="text-sm font-semibold">S2 HubDB Importer</p>
       </div>
       <nav className="flex-1 overflow-y-auto p-3">
         <ul className="space-y-1">
@@ -77,10 +80,11 @@ export function Sidebar({ userEmail }: { userEmail?: string | null }) {
                 <Link
                   href={item.href}
                   aria-current={active ? "page" : undefined}
+                  style={active ? { backgroundColor: item.activeBg } : undefined}
                   className={
                     "flex items-center gap-2 rounded-md px-2.5 py-1.5 text-sm transition-colors " +
                     (active
-                      ? "bg-foreground text-background"
+                      ? "text-background"
                       : "text-foreground/80 hover:bg-muted hover:text-foreground")
                   }
                 >
@@ -131,10 +135,11 @@ export function MobileNav() {
             key={item.href}
             href={item.href}
             aria-current={active ? "page" : undefined}
+            style={active ? { backgroundColor: item.activeBg } : undefined}
             className={
               "flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs whitespace-nowrap transition-colors " +
               (active
-                ? "bg-foreground text-background"
+                ? "text-background"
                 : "text-foreground/80 hover:bg-muted")
             }
           >

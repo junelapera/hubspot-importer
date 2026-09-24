@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { DocsToc } from "./docs-toc";
+import { PAGE_ACCENTS, PageHeader } from "@/components/ui/page-header";
 
 export const metadata = {
   title: "Docs · S2 HubDB Importer",
@@ -36,16 +37,12 @@ export default function DocsPage() {
   return (
     <main className="mx-auto max-w-6xl px-6 py-12 lg:grid lg:grid-cols-[minmax(0,1fr)_200px] lg:gap-10">
       <div className="space-y-10">
-        <header className="space-y-3">
-          <p className="text-xs uppercase tracking-wider text-muted-foreground">Guide</p>
-          <h1 className="text-3xl font-semibold">How to use S2 HubDB Importer</h1>
-          <p className="text-base leading-relaxed text-muted-foreground">
-            A step-by-step walkthrough for importing relational data (a main
-            table plus its foreign lookups) into a HubSpot HubDB portal, with a
-            downloadable example dataset you can run end-to-end against a
-            sandbox portal in a few minutes.
-          </p>
-        </header>
+        <PageHeader
+          icon={PAGE_ACCENTS.docs.icon}
+          accentColor={PAGE_ACCENTS.docs.color}
+          title="How to use S2 HubDB Importer"
+          description="A step-by-step walkthrough for importing relational data (a main table plus its foreign lookups) into a HubSpot HubDB portal, with a downloadable example dataset you can run end-to-end against a sandbox portal in a few minutes."
+        />
 
         <DocsToc variant="inline" />
 

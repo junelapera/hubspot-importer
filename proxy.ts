@@ -62,8 +62,12 @@ export async function proxy(req: NextRequest): Promise<NextResponse> {
   return NextResponse.redirect(loginUrl);
 }
 
-// Match all pages + API routes. Exclude Next's static asset paths and the
-// default favicon so image requests don't re-run the gate on every asset.
+// Match all pages + API routes. Exclude Next's static asset paths, the
+// default favicon, and any request ending in a common static-file
+// extension (public/*.svg, *.png, etc.) so asset fetches don't hit the
+// auth gate and get 307'd to /login.
 export const config = {
-  matcher: ["/((?!_next/static|_next/image|favicon.ico).*)"],
+  matcher: [
+    "/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico|avif)$).*)",
+  ],
 };

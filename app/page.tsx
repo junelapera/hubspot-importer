@@ -1,23 +1,25 @@
 import Link from "next/link";
+import { PAGE_ACCENTS, PageHeader } from "@/components/ui/page-header";
 
 export default function Home() {
   return (
     <main className="mx-auto max-w-3xl px-6 py-16 space-y-10">
-      <header className="space-y-3">
-        <p className="text-xs uppercase tracking-wider text-muted-foreground">
-          Phase 1 · MVP
-        </p>
-        <h1 className="text-3xl font-semibold">S2 HubDB Importer</h1>
-        <p className="text-base leading-relaxed text-muted-foreground">
-          Import relational data into HubSpot HubDB — resolves{" "}
-          <code className="rounded bg-muted px-1.5 py-0.5 text-sm">FOREIGN_ID</code>{" "}
-          cells from natural keys so a{" "}
-          <code className="rounded bg-muted px-1.5 py-0.5 text-sm">
-            products → brands + categories
-          </code>{" "}
-          dataset lands in one pass.
-        </p>
-      </header>
+      <PageHeader
+        icon={PAGE_ACCENTS.home.icon}
+        accentColor={PAGE_ACCENTS.home.color}
+        title="S2 HubDB Importer"
+        description={
+          <>
+            Import relational data into HubSpot HubDB — resolves{" "}
+            <code className="rounded bg-muted px-1.5 py-0.5 text-sm">FOREIGN_ID</code>{" "}
+            cells from natural keys so a{" "}
+            <code className="rounded bg-muted px-1.5 py-0.5 text-sm">
+              products → brands + categories
+            </code>{" "}
+            dataset lands in one pass.
+          </>
+        }
+      />
 
       <nav aria-label="Sections" className="grid gap-3 sm:grid-cols-2">
         <SectionLink

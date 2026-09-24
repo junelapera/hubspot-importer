@@ -14,7 +14,15 @@ export default async function RegisterPage({
   const params = await searchParams;
   const next = typeof params.next === "string" ? params.next : "/";
   return (
-    <main className="mx-auto flex min-h-screen max-w-md flex-col justify-center px-6 py-12">
+    <main className="mx-auto flex min-h-screen max-w-md flex-col justify-center gap-6 px-6 py-12">
+      <div className="flex justify-center">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src="/saltedstone-logo.svg"
+          alt="Saltedstone"
+          className="h-8 w-auto dark:invert"
+        />
+      </div>
       <div className="space-y-6 rounded-md border border-border bg-card p-8">
         <header className="space-y-1">
           <p className="text-xs uppercase tracking-wider text-muted-foreground">S2 HubDB Importer</p>

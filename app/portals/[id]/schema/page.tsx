@@ -7,6 +7,7 @@ import type { HubdbColumn, PortalSchemaTable } from "@/lib/hubdb";
 import { DropTableButton } from "./drop-table-button";
 import { RefreshButton } from "./refresh-button";
 import { SchemaPlanner } from "./schema-planner";
+import { PAGE_ACCENTS, PageHeader } from "@/components/ui/page-header";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -34,20 +35,17 @@ export default async function PortalSchemaPage({ params }: Props) {
 
   return (
     <main className="mx-auto max-w-4xl px-6 py-12 space-y-8">
-      <header className="space-y-2">
-        <p className="text-xs uppercase tracking-wider text-muted-foreground">Phase 1 · F3</p>
-        <div className="flex flex-wrap items-baseline gap-3">
-          <h1 className="text-2xl font-semibold">{portal.label}</h1>
-          <EnvBadge env={portal.env} />
-          {portal.hubId ? (
-            <span className="text-sm text-muted-foreground">Hub {portal.hubId}</span>
-          ) : null}
-        </div>
-        <p className="text-sm text-muted-foreground">
-          Draft schemas from the portal. Column lists reflect what a subsequent PATCH would see, not the currently
-          published state.
-        </p>
-      </header>
+      <PageHeader
+        icon={PAGE_ACCENTS.portals.icon}
+        accentColor={PAGE_ACCENTS.portals.color}
+        title={portal.label}
+        description="Draft schemas from the portal. Column lists reflect what a subsequent PATCH would see, not the currently published state."
+      >
+        <EnvBadge env={portal.env} />
+        {portal.hubId ? (
+          <span className="text-sm text-muted-foreground">Hub {portal.hubId}</span>
+        ) : null}
+      </PageHeader>
 
       <section className="flex items-center justify-between gap-3">
         <div className="text-xs text-muted-foreground">
