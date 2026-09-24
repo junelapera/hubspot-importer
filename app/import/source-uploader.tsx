@@ -44,7 +44,7 @@ type ParseResponse = {
   kind?: string;
 };
 
-type Mode = "csv" | "json";
+type Mode = "csv" | "xlsx" | "json";
 type SubmitState =
   | { kind: "idle" }
   | { kind: "submitting" }
@@ -118,6 +118,24 @@ export function SourceUploader({ portals }: { portals: PortalSummary[] }) {
     const form = new FormData(e.currentTarget);
     try {
       const res = await fetch("/api/sources/csv", { method: "POST", body: form });
+      const payload = (await res.json()) as ParseResponse;
+      if (!res.ok) {
+        setState({ kind: "error", message: payload.error ?? `HTTP ${res.status}` });
+        return;
+      }
+      setState({ kind: "success", response: payload });
+      setDryRunSignature(null);
+    } catch (err) {
+      setState({ kind: "error", message: (err as Error).message });
+    }
+  }
+
+  async function submitXlsx(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    setState({ kind: "submitting" });
+    const form = new FormData(e.currentTarget);
+    try {
+      const res = await fetch("/api/sources/xlsx", { method: "POST", body: form });
       const payload = (await res.json()) as ParseResponse;
       if (!res.ok) {
         setState({ kind: "error", message: payload.error ?? `HTTP ${res.status}` });
@@ -204,6 +222,9 @@ export function SourceUploader({ portals }: { portals: PortalSummary[] }) {
           <ModeTab active={mode === "csv"} onClick={() => setMode("csv")}>
             CSV upload
           </ModeTab>
+          <ModeTab active={mode === "xlsx"} onClick={() => setMode("xlsx")}>
+            XLSX upload
+          </ModeTab>
           <ModeTab active={mode === "json"} onClick={() => setMode("json")}>
             JSON paste
           </ModeTab>
@@ -266,6 +287,61 @@ export function SourceUploader({ portals }: { portals: PortalSummary[] }) {
             <div className="flex items-center gap-3">
               <Button type="submit" disabled={disabled}>
                 {state.kind === "submitting" ? "Parsing…" : "Parse CSV"}
+              </Button>
+              {state.kind === "error" ? (
+                <p className="text-sm text-destructive">
+                  {state.message}
+                  {state.extra ? ` (${state.extra})` : ""}
+                </p>
+              ) : null}
+            </div>
+          </form>
+        ) : mode === "xlsx" ? (
+          <form onSubmit={submitXlsx} className="space-y-4 rounded-md border border-border p-4">
+            <label className="flex flex-col gap-1 text-sm">
+              <span className="font-medium">XLSX files</span>
+              <input
+                name="file"
+                type="file"
+                accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                multiple
+                required
+                disabled={disabled}
+                className="text-sm file:mr-3 file:rounded-md file:border file:border-input file:bg-background file:px-3 file:py-1.5 file:text-sm file:font-medium hover:file:bg-muted/60"
+              />
+              <span className="text-xs text-muted-foreground">
+                Each sheet becomes a table. Single-sheet workbooks use the filename; multi-sheet
+                workbooks combine as <code>filename__sheetname</code>.
+              </span>
+            </label>
+
+            <div className="grid gap-3 sm:grid-cols-2">
+              <label className="flex flex-col gap-1 text-sm">
+                <span className="font-medium">Sheet allowlist</span>
+                <input
+                  name="sheetNames"
+                  type="text"
+                  disabled={disabled}
+                  placeholder="brands, categories, products"
+                  className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/50"
+                />
+                <span className="text-xs text-muted-foreground">
+                  Comma-separated names. Blank = all sheets.
+                </span>
+              </label>
+              <InputField
+                label="Header row"
+                name="headerRow"
+                hint="0-based index (default 0)"
+                type="number"
+                min={0}
+                disabled={disabled}
+              />
+            </div>
+
+            <div className="flex items-center gap-3">
+              <Button type="submit" disabled={disabled}>
+                {state.kind === "submitting" ? "Parsing…" : "Parse XLSX"}
               </Button>
               {state.kind === "error" ? (
                 <p className="text-sm text-destructive">

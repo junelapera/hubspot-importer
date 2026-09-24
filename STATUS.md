@@ -2,7 +2,38 @@
 
 Running log of where the HubDB Importer project is, what's in flight, and what's next. Update as we go.
 
-## Current state — 2026-09-25 (late evening)
+## Current state — 2026-09-26
+
+**Phase 2 — XLSX source shipped.** Fifth Phase-2 epic ticked (all three checkboxes on the "XLSX source" block in `phases/phase-2.md`). Users can now upload `.xlsx` files alongside CSV / JSON; each sheet becomes an independent table that flows through the same mapping → dry run → execute pipeline unchanged.
+
+1. **`lib/source/xlsx.ts` (new)** — pure `parseXlsx(bytes, opts)` returns `{sheets: [{name, headers, rows, warnings}], warnings}`. Uses SheetJS (`xlsx` npm, 0.18.5, Apache 2.0) via `XLSX.read(bytes, {type: 'array'})` + `sheet_to_json(sheet, {header: 1, defval: '', blankrows: false, raw: false})` to get row-major matrices with all cells stringified (matches CSV cell semantics — no ghost numbers/booleans getting into the pipeline). Sheet names normalized to safe identifiers (`[^\w.-]+ → _`) with clash-suffix dedup; headers deduped via the same `column_N` + `name_2` pattern as CSV. `headerRow` + `sheetNames` (allowlist, warns on unknown names) options. 9 vitest cases covering single-sheet, multi-sheet, cell coercion, header-row override, dedup, whitelist filtering, sheet-name normalization/clash, empty-sheet path, and empty-input rejection
+2. **`POST /api/sources/xlsx` (new)** — mirrors CSV endpoint's contract. 25 MB per-file cap (a touch higher than CSV's 20 MB since XLSX files carry formatting/style overhead for the same row count). Emits the same `{tables[], warnings[]}` shape as `/csv` and `/json` so `SourceUploader`'s parse response type didn't need to change. Table names combine as `filename__sheetname` for multi-sheet workbooks and drop to just `filename` when the workbook has a single sheet (matches "filename == tablename" convention). Coerces `headerRow` and `sheetNames` from form fields with the same defensive parsing as CSV
+3. **XLSX tab in `SourceUploader`** — third `ModeTab` alongside CSV / JSON. Form accepts multiple `.xlsx` uploads, a text input for the sheet allowlist ("brands, categories, products" — blank = all), and the same "Header row" number input helper the CSV form uses. No delimiter / encoding controls (not applicable). `submitXlsx` handler mirrors `submitCsv` — POST to `/api/sources/xlsx`, drop into the same `SubmitState.success` variant so downstream panels light up identically
+4. **`lib/source/index.ts` barrel** — re-exports `parseXlsx`, `XlsxParseError`, plus the option/result types
+
+**Files touched:** `lib/source/xlsx.ts` (new), `lib/source/xlsx.test.ts` (new), `lib/source/index.ts` (barrel), `app/api/sources/xlsx/route.ts` (new), `app/import/source-uploader.tsx` (tab + handler + form), `phases/phase-2.md` (three checkboxes). `package.json` gains `xlsx@^0.18.5`. 233 vitest cases / 17 suites (+9 net-new), tsc + lint clean
+
+**Design decisions worth remembering:**
+- **`raw: false` on `sheet_to_json`.** Forces SheetJS to format numbers, dates, and booleans as their display strings before we see them. Without this, a numeric SKU column would come through as JS `number` values, which the downstream validator (`validate.ts`) doesn't expect (it assumes cell values are always strings). Cell semantics now match CSV exactly: every cell is a string
+- **Single-sheet workbooks drop the sheet name from the table name.** Users who export a single-sheet workbook expect `products.xlsx` to become a table named `products`, not `products__Sheet1`. Multi-sheet workbooks need disambiguation, so those combine as `filename__sheetname` — the double underscore signals "this came from a specific sheet"
+- **Sheet allowlist is comma-separated string, not multi-select.** Considered a chip-based multi-select but that requires reading the workbook client-side first to know the sheet names, which doubles parse work. A text input scales to any workbook and unknown names emit a warning listing what's available in the response — the UX loop is "type names → parse → check warnings → adjust names" and terminates in one round in the common case
+- **25 MB cap vs CSV's 20 MB.** XLSX files carry formatting, styles, and sometimes embedded thumbnails/images that make them denser than a CSV of the same row count. Bumped by 25% to accommodate real-world exports without being generous enough to invite abuse
+
+**Still open on `phases/phase-2.md`:**
+- Google Sheets source (OAuth + sheet picker + refresh-from-sheet)
+- Resume from failure (Inngest per `docs/long-job-runner.md`)
+- Full cycle handling — two-phase write for cyclic FK graphs, self-reference end-to-end
+- F11 tail — re-run saved mapping against a new file / different portal
+- (Provision-writes-back-tableId — Phase-1 F3 polish carried over)
+
+**Next up (unblocked):**
+- **Google Sheets source** — OAuth setup + `/api/sources/gsheets` + refresh action on saved mappings. Larger; needs Google Cloud project setup
+- **Resume from failure** — Inngest wiring per `docs/long-job-runner.md`; the last "MVP → production scale" unlock
+- **Sandbox smoke test of XLSX** — round-trip a multi-sheet workbook through `/import`
+
+---
+
+## Prior state — 2026-09-25 (late evening)
 
 **Second-try fix on Base UI Select trigger.** The `deriveItemLabel` + `label={derivedLabel}` change from the earlier evening entry (commit `cbf08c1`) didn't actually solve the trigger-display issue — the `Select.Item.label` prop in Base UI is for **keyboard text-navigation matching** ("type 's' to jump to 'sandbox'"), NOT the trigger display. Trigger display comes from `Select.Root`'s `items` prop, or from a `children` render function on `Select.Value`. Without either, `Select.Value` stringifies the raw `value` (uuid, sentinel, whatever). Confirmed by reading `@base-ui/react/select`'s type definitions after the user reported the uuid still showing.
 

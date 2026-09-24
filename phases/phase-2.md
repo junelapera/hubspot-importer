@@ -33,9 +33,9 @@
 - [x] Export inferred schema as schema definition JSON (`toSchema` strips UI-only fields; client-side blob download named `schema.json`)
 
 ## XLSX source
-- [ ] Upload endpoint for `.xlsx`
-- [ ] Sheet-per-table detection
-- [ ] Preview + validation parity with CSV path
+- [x] Upload endpoint for `.xlsx` (`POST /api/sources/xlsx`; 25 MB per-file cap; multipart with one or more `file` fields)
+- [x] Sheet-per-table detection (`lib/source/xlsx.ts::parseXlsx` uses SheetJS; each sheet becomes an independent table. Single-sheet workbooks use the filename as table name; multi-sheet workbooks combine as `filename__sheetname`)
+- [x] Preview + validation parity with CSV path (same `{name, headers, preview, rows, totalRows, parseWarnings, validationWarnings}` shape; `SchemaInferPanel` / mapping wizard / dry run / execute all work unchanged)
 
 ## Google Sheets source
 - [ ] OAuth flow for Google Sheets read access

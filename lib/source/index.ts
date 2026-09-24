@@ -4,6 +4,9 @@ export type { CsvDelimiter, CsvEncoding, CsvParseOptions, CsvParseResult, CsvDet
 export { parseJson } from "./json";
 export type { JsonParseError, JsonParseOutcome, JsonParseResult, JsonTable } from "./json";
 
+export { parseXlsx, XlsxParseError } from "./xlsx";
+export type { XlsxParseOptions, XlsxParseResult, XlsxSheetResult } from "./xlsx";
+
 export {
   validateSource,
   HUBDB_TEXT_MAX,

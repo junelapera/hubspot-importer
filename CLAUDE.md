@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Repository status
 
-**Phase 1 MVP — usable end-to-end.** 224 vitest cases / 16 suites. The full source → mapping → execute → publish loop runs at `/import`: F1 (portal connection) → F2 (source ingestion) → F3 (introspection + diff + provision) → F4 (column mapping) → F5 (foreign-relationship config) → F6 (dependency-order display) → F7 (dry run + unresolved-refs CSV download, execute gated on matching signature) → F8 (execute + optional publish, with server-side cell-length + hs_path preflight, stale-FK retry, and cancel-at-batch-boundary) → F10 (results & logging with CSV/JSON downloads) → F11 (mapping profile save/load with cached target-table id + job history at `/jobs`). All four `onMissing` FK policies wired (skip-row / null / fail / create-stub). Composite naturalKey + multi-value FK working. Node 22+ required (native `WebSocket` global). Delete-table endpoint at `DELETE /api/portals/[id]/tables/[tableId]`. Both Phase-0 open questions closed via spike/15 + `docs/long-job-runner.md`. Deploy scaffolding in place (`vercel.json` + `DEPLOYMENT.md`). Basic Auth gate lives at `proxy.ts` (renamed from `middleware.ts` for Next 16).
+**Phase 1 MVP — usable end-to-end.** 233 vitest cases / 17 suites. The full source → mapping → execute → publish loop runs at `/import`: F1 (portal connection) → F2 (source ingestion) → F3 (introspection + diff + provision) → F4 (column mapping) → F5 (foreign-relationship config) → F6 (dependency-order display) → F7 (dry run + unresolved-refs CSV download, execute gated on matching signature) → F8 (execute + optional publish, with server-side cell-length + hs_path preflight, stale-FK retry, and cancel-at-batch-boundary) → F10 (results & logging with CSV/JSON downloads) → F11 (mapping profile save/load with cached target-table id + job history at `/jobs`). All four `onMissing` FK policies wired (skip-row / null / fail / create-stub). Composite naturalKey + multi-value FK working. Node 22+ required (native `WebSocket` global). Delete-table endpoint at `DELETE /api/portals/[id]/tables/[tableId]`. Both Phase-0 open questions closed via spike/15 + `docs/long-job-runner.md`. Deploy scaffolding in place (`vercel.json` + `DEPLOYMENT.md`). Basic Auth gate lives at `proxy.ts` (renamed from `middleware.ts` for Next 16).
 
 **Still open on `phases/phase-1-mvp.md`** (polish + robustness intentionally deferred):
 - F3: write provisioned table IDs back into mapping profile (now that `MappingState.targetTableId` exists, only the schema-planner UI needs to write it back)
@@ -41,6 +41,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - `lib/db/portals.ts` — typed portal repo: `PortalRow` (server) vs `PortalSummary` (client-safe); `createPortal` / `listPortals` / `getPortalById` / `getPortalToken` (server-only decrypt) / `deletePortal`
 - `lib/source/csv.ts` — CSV parser (papaparse + BOM sniff for UTF-8/16, delimiter auto-detect, header dedup, `headerRow` override, manual overrides for all three)
 - `lib/source/json.ts` — JSON parser: two shapes (`{ table: rows[] }` or `[{ table, rows }]`), nested-value rejection with `path: "table[i].col"` pointer
+- `lib/source/xlsx.ts` — Excel parser via SheetJS (`xlsx` npm). `parseXlsx(bytes, {headerRow, sheetNames})` returns `{sheets, warnings}` — each sheet is a `{name, headers, rows, warnings}` independent table. `raw: false` on `sheet_to_json` so numbers / dates / booleans get stringified to match CSV cell semantics; without it downstream validators would see `number` values and misfire
 - `lib/source/validate.ts` — warning collector (row-count cap, cell-length caps, dup natural key, empty required col). Reuses `HUBDB_MAX_ROWS_PER_TABLE` + `normalizeKey`. Natural-key + required-col checks are generic and stay quiet until F4 supplies args
 
 **App surface** (F1 + F2 + F3 + F4 + F5 + F6 + F7 + F8):
@@ -77,7 +78,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - ESLint 9 flat config (`eslint.config.mjs`)
 - **No `src/` dir** — `app/`, `components/`, `lib/`, `workers/` sit at the repo root (matches PRD §9 layout)
 - **Vitest 5** as the test runner, colocated `*.test.ts` next to source (not a `tests/` dir). Note: no `vitest.config.ts` yet — import from `lib/` with relative paths, not the `@/` alias
-- Deps: `@supabase/supabase-js`, `zod`, `papaparse`, `lucide-react` (icons)
+- Deps: `@supabase/supabase-js`, `zod`, `papaparse`, `xlsx` (SheetJS 0.18.5, Apache 2.0), `lucide-react` (icons)
 
 ## Commands
 
