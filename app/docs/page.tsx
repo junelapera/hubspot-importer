@@ -104,6 +104,14 @@ export default function DocsPage() {
       <Section id="prerequisites" title="Prerequisites">
         <ul className="list-disc space-y-1 pl-5">
           <li>
+            <strong>An @saltedstone.com email address.</strong> Registration
+            is restricted to the Saltedstone domain. Visit{" "}
+            <NavLink href="/register">/register</NavLink> to self-create an
+            account (first visit) or <NavLink href="/login">/login</NavLink>{" "}
+            if you already have one. Your signed-in email appears at the
+            bottom of the sidebar.
+          </li>
+          <li>
             A HubSpot portal (sandbox strongly recommended for first-time
             runs) with a private-app token that has the <Code>hubdb</Code>{" "}
             read + write scopes. Create one under{" "}
@@ -546,6 +554,19 @@ export default function DocsPage() {
             <Code>sourceTable</Code>/<Code>matchKey</Code> values that
             display as selected but never committed to state. Re-save the
             profile to overwrite.
+          </li>
+          <li>
+            <strong>&quot;Only @saltedstone.com email addresses are allowed to register&quot;</strong>{" "}
+            — that&apos;s working as designed; the app is Saltedstone-internal.
+            If you need access and have a different email, ask an admin to
+            add an alias for you on their end.
+          </li>
+          <li>
+            <strong>Registered but the login form says &quot;Email not confirmed&quot;</strong>{" "}
+            — the Supabase project has &quot;Confirm email&quot; enabled.
+            Ask an admin to toggle it off under{" "}
+            <em>Authentication → Providers → Email → Confirm email</em> in
+            the Supabase dashboard, then log in again.
           </li>
           <li>
             <strong>Mapping cards missing after navigating back to Import</strong>{" "}

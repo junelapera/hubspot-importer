@@ -37,6 +37,14 @@
 - [x] Sheet-per-table detection (`lib/source/xlsx.ts::parseXlsx` uses SheetJS; each sheet becomes an independent table. Single-sheet workbooks use the filename as table name; multi-sheet workbooks combine as `filename__sheetname`)
 - [x] Preview + validation parity with CSV path (same `{name, headers, preview, rows, totalRows, parseWarnings, validationWarnings}` shape; `SchemaInferPanel` / mapping wizard / dry run / execute all work unchanged)
 
+## User authentication
+- [x] Supabase Auth integration (`lib/db/supabase-browser.ts` + `lib/db/supabase-server-auth.ts` — anon-key clients for auth flow, service-role client stays separate for DB queries)
+- [x] `/login` + `/register` pages with email+password forms (auth pages skip the sidebar chrome via a pathname check in `nav.tsx`)
+- [x] `/api/auth/register` server-side re-validates the @saltedstone.com domain (pure helper `lib/auth/email-domain.ts::normalizeAndCheckEmail` with 8 vitest cases covering casing / whitespace / malformed input / other domains / subdomains / non-string input)
+- [x] `/api/auth/logout` + `LogoutButton` client component (double-clears: browser signOut + server cookie clear)
+- [x] Sidebar shows signed-in email + Sign out link; `layout.tsx` fetches current user server-side via `getCurrentUser` and passes to `Sidebar` as a prop
+- [x] `proxy.ts` gates all routes: if `BASIC_AUTH_*` env vars set → Basic Auth (legacy, unchanged); otherwise Supabase session check → redirect to `/login?next=<url>` if unauthenticated. Public paths (`/login`, `/register`, `/api/auth/*`, static) always pass through. Middleware supports both Auth backends without a code change — env-var-driven
+
 ## Wizard state persistence
 - [x] Persist wizard state across nav (`app/import/source-uploader.tsx` — mode + mappings + selectedProfileId + gsheetRows saved to `sessionStorage` under `hubdb-importer:wizard:{portalId}` on every change; hydrated on mount client-side; resume flow takes precedence. Raw parsed rows intentionally NOT persisted — sessionStorage's ~5 MB cap can't hold a 10k-row CSV, and re-parsing is one click. Blue "Restored N mapping(s)" banner + "Clear session" button appear when the user returns and mappings were rehydrated but no source is parsed yet)
 

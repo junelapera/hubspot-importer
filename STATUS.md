@@ -2,7 +2,60 @@
 
 Running log of where the HubDB Importer project is, what's in flight, and what's next. Update as we go.
 
-## Current state — 2026-09-26 (night)
+## Current state — 2026-09-27 (early morning)
+
+**Per-user authentication shipped — Supabase Auth with @saltedstone.com email allowlist, immediate login, and Basic Auth kept as a legacy fallback.** First real user-account system on this app — previously the only gate was HTTP Basic Auth (shared credential, no user identity). This ships email+password self-registration + login + session cookies + logout with the domain check enforced both client + server side. Zero-disruption migration: existing deploys with `BASIC_AUTH_*` env vars keep working unchanged; delete those vars + redeploy + register a first user to migrate.
+
+**Manual Supabase dashboard steps required before this works** (flagged in DEPLOYMENT.md + README):
+1. Authentication → Providers → Email — enabled by default, confirm it's on
+2. Authentication → Providers → Email → **Confirm email → OFF** (users log in immediately after registering; @saltedstone.com allowlist is the trust boundary — no per-mailbox verification needed for an internal tool)
+3. Copy `anon public` key from Project Settings → API → add `NEXT_PUBLIC_SUPABASE_ANON_KEY` (+ duplicate `SUPABASE_URL` as `NEXT_PUBLIC_SUPABASE_URL`) to `.env.local`
+
+**What shipped:**
+
+1. **`lib/auth/email-domain.ts` (new)** — pure `normalizeAndCheckEmail(input)` returns the trimmed + lowercased email if it ends in `@saltedstone.com`, else `null`. Includes minimal shape check (one `@`, non-empty local + domain, exactly one `@`). `isAllowedEmail(input)` is the boolean wrapper. `ALLOWED_EMAIL_DOMAIN` const exported for UI copy. 8 vitest cases: allows saltedstone.com (any casing / trimmed), rejects other domains (gmail, saltedstone.io, saltedstone.co), rejects subdomains (dev.saltedstone.com), rejects malformed input (no `@`, empty local, empty domain, double `@`, empty string, whitespace-only), rejects non-string input (null / undefined / number / object)
+2. **`lib/db/supabase-browser.ts` (new)** — `createSupabaseBrowserClient()` factory using `@supabase/ssr`'s `createBrowserClient`. Reads `NEXT_PUBLIC_SUPABASE_URL` + `NEXT_PUBLIC_SUPABASE_ANON_KEY` (the public anon key, safe to expose to the browser). Marked `"use client"` — throws if imported from server code
+3. **`lib/db/supabase-server-auth.ts` (new)** — `createSupabaseServerAuthClient()` using `createServerClient` + `cookies()` from `next/headers`. Reads the session cookie for the current request. Also exports `getCurrentUser()` convenience that returns the logged-in user or null. Kept separate from the existing `createSupabaseServerClient()` (which uses `SUPABASE_SERVICE_ROLE_KEY` and bypasses RLS for DB queries)
+4. **`proxy.ts` rewritten** — two auth modes, auto-selected. If `BASIC_AUTH_USER` + `BASIC_AUTH_PASSWORD` are set → legacy Basic Auth path (unchanged behavior). Otherwise → Supabase session check: build a Supabase server client with cookie read/write, call `supabase.auth.getUser()`, redirect to `/login?next=<url>` if null. Public paths (`/login`, `/register`, `/api/auth/*`, `/favicon*`, static assets via the existing matcher) always pass through. `NextResponse.next({ request: req })` pattern is critical — Supabase rotates the access token on read if it's near expiry, and the refreshed cookie needs to land on the response
+5. **`/login` page** (`app/login/page.tsx` + `login-form.tsx`) — email + password form using the browser client's `signInWithPassword`. Preserves `?next=` param → `router.push(next); router.refresh()` after success so server components re-render with the session cookie visible. Error message pass-through (Supabase already returns generic "Invalid login credentials" for both wrong-password and unknown-email so no email-enumeration leak). Link to `/register` at the bottom
+6. **`/register` page** (`app/register/page.tsx` + `register-form.tsx`) — email + password + confirm form. Client-side validation (domain check via `isAllowedEmail`, password ≥ 8 chars, passwords match) for UX. POST to `/api/auth/register`. Link to `/login` at the bottom
+7. **`POST /api/auth/register`** (`app/api/auth/register/route.ts`) — server-side re-validates the domain (never trust the client), calls `supabase.auth.signUp({email, password})`. Detects the "Confirm email" enabled state (returns `pendingConfirmation: true` with a 202) so the UX doesn't silently break if someone forgets to disable it in Supabase. Maps "already registered" to 409, everything else to 400 with Supabase's message
+8. **`POST /api/auth/logout`** — clears the session cookie via `supabase.auth.signOut()`. `LogoutButton` client component (`app/logout-button.tsx`) double-clears — browser client `signOut()` + POST to the logout endpoint — so both sides of the session are cleaned even if one is flaky
+9. **`Sidebar` updated** — accepts `userEmail?: string | null` prop; renders a compact account block above the github link (truncated email + Sign out link) when set. Both `Sidebar` and `MobileNav` return `null` on `/login` and `/register` pathnames (via a new `AUTH_PATHS` set) so the auth cards get the full viewport
+10. **`layout.tsx`** — now async; calls `getCurrentUser()` inside a try/catch (throws when auth env vars aren't set → dev-mode fallback), passes the email to `Sidebar`
+11. **`.env.example` + DEPLOYMENT.md + README.md updated** — new `NEXT_PUBLIC_SUPABASE_URL` + `NEXT_PUBLIC_SUPABASE_ANON_KEY` documented; DEPLOYMENT.md explains the manual Supabase dashboard steps; "Basic Auth gate" section rewritten as "Auth gate" describing both modes and the env-var-driven mode selection
+
+**Files touched:** `lib/auth/email-domain.ts` (new), `lib/auth/email-domain.test.ts` (new, 8 cases), `lib/db/supabase-browser.ts` (new), `lib/db/supabase-server-auth.ts` (new), `proxy.ts` (rewrite — two-mode auth), `app/login/page.tsx` (new), `app/login/login-form.tsx` (new), `app/register/page.tsx` (new), `app/register/register-form.tsx` (new), `app/api/auth/register/route.ts` (new), `app/api/auth/logout/route.ts` (new), `app/logout-button.tsx` (new), `app/nav.tsx` (userEmail prop + auth-path skip + LogoutButton wire-up), `app/layout.tsx` (async + getCurrentUser + pass to Sidebar), `.env.example` (2 new vars), `DEPLOYMENT.md` (Supabase Auth setup + env-var table + auth-gate section rewrite), `README.md` (new env vars + status blurb), `phases/phase-2.md` (new "User authentication" block with 6 checkboxes ticked). +1 npm dep: `@supabase/ssr@0.12.7`. 255 vitest cases / 19 suites (+8 net-new), tsc + lint clean
+
+**Design decisions worth remembering:**
+- **Supabase Auth over custom users table.** Native to the stack (Supabase already the DB), zero code for password hashing + session management + rotation + reset flows. Downside: another Supabase feature to enable. The alternative (custom `users` table + bcrypt + our own signed session cookies + rotation) would have been ~500 more lines of code with more surface area for mistakes
+- **Domain allowlist enforced client + server, single source of truth (`normalizeAndCheckEmail`).** Client-side check is UX (immediate feedback); server-side re-validation is the security boundary. Same helper on both sides — no drift possible
+- **Immediate login (Confirm email OFF).** Internal tool + domain allowlist = trust boundary is already established at the email domain check. Adding email verification would just be friction (users get a confirmation email → click → return to log in). If someone actually wants a verification step later, flip the Supabase toggle back on and configure SMTP; the register API already detects the pendingConfirmation state and surfaces a helpful message
+- **Basic Auth kept as legacy fallback.** Zero-disruption migration path: current Hobby-tier deploys with `BASIC_AUTH_*` env vars set continue to work unchanged. Delete the env vars + redeploy + register a first user account to migrate. Prevents a hard-cutover situation where every existing deploy breaks on ship
+- **Basic Auth env-var check wins over Supabase Auth.** Explicit precedence in `proxy.ts` — if either Basic Auth env var is set, we go Basic Auth path (fail-closed if only one). Rationale: env-var config is deployer intent, and mixing modes on a single deploy would be confusing. Delete the Basic Auth vars to opt into Supabase Auth
+- **Dev-mode fallback: no auth if no env vars set.** Both `BASIC_AUTH_*` unset AND `NEXT_PUBLIC_SUPABASE_*` unset → `proxy.ts` and `layout.tsx` both fall through gracefully. Local `pnpm dev` on a bare `.env.local` still works — nobody has to configure auth just to try the app
+- **Auth pages skip the sidebar chrome.** Client-side pathname check in `nav.tsx` — Sidebar + MobileNav return `null` on `/login` and `/register` so the auth cards get the full viewport. Alternative was App Router route groups (`app/(auth)/layout.tsx`) — cleaner architecturally but more file movement; the pathname-check approach is 3 lines total and keeps the auth pages in their natural URL locations
+- **`NEXT_PUBLIC_SUPABASE_URL` duplicated with `SUPABASE_URL`.** Not aesthetically great but necessary — Next.js only exposes env vars prefixed with `NEXT_PUBLIC_` to the browser bundle. Server code reads `SUPABASE_URL`, browser code reads `NEXT_PUBLIC_SUPABASE_URL`, both point at the same project. Documented in `.env.example` + README + DEPLOYMENT
+- **LogoutButton double-clears (client `signOut` + server POST).** Redundant on paper — either alone would clear the session. Together: if `supabase.auth.signOut()` on the browser fails silently (network hiccup, cookie set with the wrong path, etc.), the server-side POST is a backstop. If the server-side POST fails, the browser one already cleared local state. Cheap belt-and-suspenders on a security-adjacent action
+- **`proxy.ts` writes refreshed session cookies to the response.** Supabase rotates the access token on read if within a refresh window. Without the `NextResponse.next({ request: req })` + cookie writeback pattern, the refreshed token would exist in memory but never persist — next request would use the old token, work, refresh again, etc. Correct pattern per `@supabase/ssr` docs
+
+**Still open on `phases/phase-2.md`:**
+- OAuth flow for private Google Sheets (deferred)
+- Refresh-from-sheet action for saved mappings
+- Full cycle handling — two-phase write for cyclic FK graphs, self-reference end-to-end
+- F11 tail — re-run saved mapping against a different portal
+- Detect interrupted jobs on runner restart (Phase 3 with Inngest)
+- (Provision-writes-back-tableId — Phase-1 F3 polish carried over)
+
+**Next up (unblocked):**
+- **Sandbox smoke test of the auth flow** — register → log in → log out → re-register with a non-saltedstone.com address (should reject) → log in from a different browser (session per browser)
+- **Inngest step-function rewrite** — remains the big one
+- **Google OAuth via Supabase Auth** — natural next auth step; Saltedstone almost certainly uses Google Workspace, one-click login beats email+password for a company-internal tool. Trivial to add: Supabase dashboard toggle + client `signInWithOAuth({provider: 'google'})` button on `/login`
+- **User activity tracking** — now that we have real user identities, `jobs` could carry `created_by_user_id` for a "who ran what import" audit trail. Trivial migration, meaningful for team environments
+
+---
+
+## Prior state — 2026-09-26 (night)
 
 **Wizard-state persistence shipped — sessionStorage-backed, per-portal.** Closes the state-loss round-trip pain point the smoke test surfaced: navigating to `/portals/[id]/schema` to provision tables and back to `/import` used to drop everything (parsed sources gone, mapping cards not rendered, needed a full re-upload + re-config). Now the mapping config survives across nav within the tab; only raw parsed rows need re-fetching (one click).
 

@@ -3,6 +3,12 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import type { CSSProperties } from "react";
+import { LogoutButton } from "./logout-button";
+
+// Auth pages render standalone (no chrome) so the login/register cards
+// take the full viewport. Sidebar + MobileNav both bail early on these
+// pathnames.
+const AUTH_PATHS = new Set(["/login", "/register"]);
 
 type NavItem = {
   href: string;
@@ -42,8 +48,9 @@ function isActive(pathname: string, item: NavItem): boolean {
   return pathname === item.href || pathname.startsWith(`${item.href}/`);
 }
 
-export function Sidebar() {
+export function Sidebar({ userEmail }: { userEmail?: string | null }) {
   const pathname = usePathname();
+  if (AUTH_PATHS.has(pathname)) return null;
   return (
     <aside
       aria-label="Primary"
@@ -89,6 +96,14 @@ export function Sidebar() {
           })}
         </ul>
       </nav>
+      {userEmail ? (
+        <div className="space-y-1 border-t border-border p-3 text-xs">
+          <p className="truncate font-medium text-foreground" title={userEmail}>
+            {userEmail}
+          </p>
+          <LogoutButton />
+        </div>
+      ) : null}
       <div className="border-t border-border p-3 text-[11px] text-muted-foreground">
         <a
           href="https://github.com/junelapera/hubspot-importer"
@@ -103,6 +118,7 @@ export function Sidebar() {
 
 export function MobileNav() {
   const pathname = usePathname();
+  if (AUTH_PATHS.has(pathname)) return null;
   return (
     <nav
       aria-label="Primary"
