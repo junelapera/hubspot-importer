@@ -158,12 +158,53 @@ export default function DocsPage() {
           body={
             <>
               From the portal detail page, paste{" "}
-              <Code>schema.json</Code> into the schema planner. The diff view
-              shows each table as <Code>create / match / update / conflict</Code>{" "}
-              — click <em>Provision</em>. Tables are created draft-only in
-              topological order (foreign tables first). If a table already
-              exists with a conflicting column type, the diff stops and
-              reports the conflict rather than silently retyping.
+              <Code>schema.json</Code> into the schema planner. The flow is
+              two-step:
+              <br />
+              <br />
+              <strong>1. Generate plan</strong> — POSTs your schema to{" "}
+              <Code>/api/portals/[id]/diff</Code>. The server parses it,
+              fetches the portal&apos;s current draft schema, and returns a
+              per-table verdict:
+              <ul className="mt-2 list-disc space-y-1 pl-5">
+                <li>
+                  <Code>create</Code> — table doesn&apos;t exist yet, will be
+                  created draft-only.
+                </li>
+                <li>
+                  <Code>match</Code> — portal already has this table with
+                  identical columns; nothing to do.
+                </li>
+                <li>
+                  <Code>update</Code> — portal has this table but is missing
+                  columns; they&apos;ll be added.
+                </li>
+                <li>
+                  <Code>conflict</Code> — an existing column&apos;s type
+                  doesn&apos;t match the schema. The provisioner refuses to
+                  retype (v1 never drops or retypes columns), so this stops
+                  the flow and lists what needs manual reconciliation.
+                </li>
+              </ul>
+              No writes happen — this is a preview.
+              <br />
+              <br />
+              <strong>2. Provision</strong> — only enabled once the plan
+              comes back with zero conflicts. POSTs to{" "}
+              <Code>/api/portals/[id]/provision</Code>, which creates the
+              missing tables in topological order (foreign tables first) and
+              adds any missing columns. Tables are draft-only until you
+              publish them from the wizard&apos;s <em>Execute</em> step.
+              <br />
+              <br />
+              <strong>Working with your own CSVs?</strong> Instead of
+              hand-authoring the schema, use the <em>Suggest a schema</em>{" "}
+              panel that appears on <NavLink href="/import">/import</NavLink>{" "}
+              once your files are parsed. It infers types + a natural-key
+              candidate for each table, detects foreign-key columns by
+              checking value membership across tables (no name-based
+              guessing), and downloads a matching{" "}
+              <Code>schema.json</Code> you can review and paste here.
             </>
           }
         />
@@ -255,6 +296,44 @@ export default function DocsPage() {
       </Section>
 
       <Section id="reference" title="Reference">
+        <Subsection title="Schema inference">
+          <p>
+            The <em>Suggest a schema</em> panel on{" "}
+            <NavLink href="/import">/import</NavLink> runs a pure inference
+            over your parsed source rows and returns an editable schema:
+          </p>
+          <ul className="list-disc space-y-1 pl-5">
+            <li>
+              <strong>Types</strong> — checked most-specific first: DATE (
+              <Code>YYYY-MM-DD</Code>) → DATETIME (parses + has time-of-day)
+              → BOOLEAN → URL → IMAGE (URL + image extension) → CURRENCY
+              (numeric + column name matches{" "}
+              <Code>price/cost/amount/total/…</Code>) → NUMBER → RICHTEXT
+              (any cell &gt; 500 chars) → TEXT fallback. Every stricter type
+              requires <em>all</em> non-empty samples to match; one bad row
+              drops back to TEXT.
+            </li>
+            <li>
+              <strong>Natural key</strong> — a column qualifies if every
+              non-empty value is unique (case-insensitive) and it&apos;s
+              filled in ≥50% of rows. Among candidates, preference by name:{" "}
+              <Code>id</Code> · <Code>uuid</Code> · <Code>sku</Code> ·{" "}
+              <Code>slug</Code> · <Code>handle</Code> · <Code>code</Code> ·{" "}
+              <Code>key</Code> · <Code>identifier</Code>, then any{" "}
+              <Code>*_id</Code>, then shortest name wins.
+            </li>
+            <li>
+              <strong>Foreign keys</strong> — value-membership check, not a
+              name heuristic. Column A becomes FOREIGN_ID pointing at table
+              B if every non-empty value of A appears in B&apos;s natural-key
+              column (case-insensitive, all-or-nothing). Zero false
+              positives; the trade-off is that FKs with typo&apos;d or
+              genuinely unresolvable source values won&apos;t be detected —
+              fix the source and re-upload, or set the FK by hand in the
+              panel.
+            </li>
+          </ul>
+        </Subsection>
         <Subsection title="Foreign-key resolution">
           <p>
             Match keys are normalized before lookup: trim → collapse

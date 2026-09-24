@@ -3,6 +3,13 @@
 import { useRouter } from "next/navigation";
 import { useState, type FormEvent } from "react";
 import { Button } from "@/components/ui/button";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
 type SubmitState =
   | { kind: "idle" }
@@ -13,6 +20,7 @@ type SubmitState =
 export function PortalForm() {
   const router = useRouter();
   const [state, setState] = useState<SubmitState>({ kind: "idle" });
+  const [env, setEnv] = useState<"sandbox" | "production">("sandbox");
 
   async function onSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -37,6 +45,7 @@ export function PortalForm() {
       }
       setState({ kind: "success", label: payload.portal?.label ?? body.label });
       e.currentTarget.reset();
+      setEnv("sandbox");
       router.refresh();
     } catch (err) {
       setState({ kind: "error", message: (err as Error).message });
@@ -58,16 +67,20 @@ export function PortalForm() {
           />
         </Field>
         <Field label="Environment">
-          <select
-            name="env"
-            required
-            defaultValue="sandbox"
+          <input type="hidden" name="env" value={env} />
+          <Select
+            value={env}
+            onValueChange={(v) => setEnv(v as "sandbox" | "production")}
             disabled={disabled}
-            className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/50"
           >
-            <option value="sandbox">sandbox</option>
-            <option value="production">production</option>
-          </select>
+            <SelectTrigger className="w-full">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="sandbox">sandbox</SelectItem>
+              <SelectItem value="production">production</SelectItem>
+            </SelectContent>
+          </Select>
         </Field>
         <Field label="Hub ID (optional)" hint="Top-right of the HubSpot UI">
           <input

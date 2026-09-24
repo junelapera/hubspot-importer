@@ -2,6 +2,13 @@
 
 import { useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import type { DryRunSource } from "@/lib/dry-run";
 import type { ImportEvent, ImportResult, RowError } from "@/lib/hubdb";
 import type { MappingState } from "@/lib/mapping";
@@ -136,16 +143,20 @@ export function ExecutePanel({
         <div className="flex items-center gap-3">
           <label className="flex items-center gap-2 text-xs">
             <span>Publish</span>
-            <select
+            <Select
               value={publish}
-              onChange={(e) => setPublish(e.target.value as PublishMode)}
+              onValueChange={(v) => setPublish(v as PublishMode)}
               disabled={stage.kind === "running"}
-              className="rounded-md border border-input bg-background px-2 py-1"
             >
-              <option value="none">none (draft only)</option>
-              <option value="foreign-only">foreign tables only</option>
-              <option value="all">all</option>
-            </select>
+              <SelectTrigger size="sm">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">none (draft only)</SelectItem>
+                <SelectItem value="foreign-only">foreign tables only</SelectItem>
+                <SelectItem value="all">all</SelectItem>
+              </SelectContent>
+            </Select>
           </label>
           {stage.kind === "running" ? (
             <Button variant="destructive" onClick={cancel}>

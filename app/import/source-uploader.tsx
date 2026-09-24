@@ -14,7 +14,15 @@ import { ImportOrderPanel } from "./import-order-panel";
 import { DryRunPanel } from "./dry-run-panel";
 import { ExecutePanel } from "./execute-panel";
 import { ProfilePanel } from "./profile-panel";
+import { SchemaInferPanel } from "./schema-infer-panel";
 import { deriveImportOrder } from "@/lib/mapping";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
 type ParsedTable = {
   name: string;
@@ -155,23 +163,23 @@ export function SourceUploader({ portals }: { portals: PortalSummary[] }) {
     <div className="space-y-8">
       <section className="space-y-3">
         <h2 className="text-sm font-semibold">Target portal</h2>
-        <select
+        <Select
           value={portalId}
-          onChange={(e) => setPortalId(e.target.value)}
+          onValueChange={(v) => setPortalId(v ?? "")}
           disabled={portals.length === 0}
-          className="w-full max-w-sm rounded-md border border-input bg-background px-3 py-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/50"
         >
-          {portals.length === 0 ? (
-            <option value="">No portals available</option>
-          ) : (
-            portals.map((p) => (
-              <option key={p.id} value={p.id}>
+          <SelectTrigger className="w-full max-w-sm">
+            <SelectValue placeholder={portals.length === 0 ? "No portals available" : "Pick a portal"} />
+          </SelectTrigger>
+          <SelectContent>
+            {portals.map((p) => (
+              <SelectItem key={p.id} value={p.id}>
                 {p.label} · {p.env}
                 {p.hubId ? ` · Hub ${p.hubId}` : ""}
-              </option>
-            ))
-          )}
-        </select>
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
         <p className="text-xs text-muted-foreground">
           Parsing runs entirely on the server; the portal isn&apos;t contacted until the mapping + provisioning steps.
         </p>
@@ -216,19 +224,31 @@ export function SourceUploader({ portals }: { portals: PortalSummary[] }) {
             </label>
 
             <div className="grid gap-3 sm:grid-cols-3">
-              <SelectField label="Delimiter" name="delimiter" hint="Auto-detected if blank" disabled={disabled}>
-                <option value="">auto</option>
-                <option value=",">, (comma)</option>
-                <option value=";">; (semicolon)</option>
-                <option value="\t">\t (tab)</option>
-                <option value="|">| (pipe)</option>
-              </SelectField>
-              <SelectField label="Encoding" name="encoding" hint="Auto from BOM if blank" disabled={disabled}>
-                <option value="">auto</option>
-                <option value="utf-8">utf-8</option>
-                <option value="utf-16le">utf-16le</option>
-                <option value="utf-16be">utf-16be</option>
-              </SelectField>
+              <SelectField
+                label="Delimiter"
+                name="delimiter"
+                hint="Auto-detected if blank"
+                disabled={disabled}
+                options={[
+                  { value: "", label: "auto" },
+                  { value: ",", label: ", (comma)" },
+                  { value: ";", label: "; (semicolon)" },
+                  { value: "\t", label: "\\t (tab)" },
+                  { value: "|", label: "| (pipe)" },
+                ]}
+              />
+              <SelectField
+                label="Encoding"
+                name="encoding"
+                hint="Auto from BOM if blank"
+                disabled={disabled}
+                options={[
+                  { value: "", label: "auto" },
+                  { value: "utf-8", label: "utf-8" },
+                  { value: "utf-16le", label: "utf-16le" },
+                  { value: "utf-16be", label: "utf-16be" },
+                ]}
+              />
               <InputField
                 label="Header row"
                 name="headerRow"
@@ -345,30 +365,45 @@ function InputField({
   );
 }
 
+const AUTO_SENTINEL = "__auto__";
+
 function SelectField({
   label,
   name,
   hint,
   disabled,
-  children,
+  options,
 }: {
   label: string;
   name: string;
   hint?: string;
   disabled?: boolean;
-  children: React.ReactNode;
+  options: readonly { value: string; label: string }[];
 }) {
+  // Base UI Select rejects empty-string values, so map "" to a sentinel
+  // that we translate back to "" for the hidden input (FormData).
+  const initial = options[0]?.value ?? "";
+  const [value, setValue] = useState<string>(initial === "" ? AUTO_SENTINEL : initial);
+  const formValue = value === AUTO_SENTINEL ? "" : value;
   return (
     <label className="flex flex-col gap-1 text-sm">
       <span className="font-medium">{label}</span>
-      <select
-        name={name}
-        disabled={disabled}
-        defaultValue=""
-        className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/50"
-      >
-        {children}
-      </select>
+      <input type="hidden" name={name} value={formValue} />
+      <Select value={value} onValueChange={(v) => setValue(v ?? AUTO_SENTINEL)} disabled={disabled}>
+        <SelectTrigger className="w-full">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          {options.map((o) => {
+            const key = o.value === "" ? AUTO_SENTINEL : o.value;
+            return (
+              <SelectItem key={key} value={key}>
+                {o.label}
+              </SelectItem>
+            );
+          })}
+        </SelectContent>
+      </Select>
       {hint ? <span className="text-xs text-muted-foreground">{hint}</span> : null}
     </label>
   );
@@ -431,6 +466,7 @@ function Results({
           Object.values(mappings).some((m) => m.targetTableName && m.naturalKey.length > 0);
         return (
           <>
+            <SchemaInferPanel sources={allSources} />
             {showOrderPanel ? <ImportOrderPanel plan={orderPlan} /> : null}
             {showDryRun ? (
               <DryRunPanel

@@ -2,7 +2,64 @@
 
 Running log of where the HubDB Importer project is, what's in flight, and what's next. Update as we go.
 
-## Current state — 2026-09-24 (evening)
+## Current state — 2026-09-25
+
+**Two follow-on passes: shadcn Select rollout + docs cleanup on the F3 two-button flow.**
+
+**A. shadcn Select swap — all 16 native `<select>` sites replaced.** Ran `pnpm dlx shadcn@latest add select` (auto-picks the Base UI variant per `components.json`'s `base-nova` style). New `components/ui/select.tsx` exports `Select / SelectTrigger / SelectValue / SelectContent / SelectItem / SelectGroup / SelectLabel / SelectSeparator / SelectScrollUp/DownButton`. Then swapped every native `<select>` in the app:
+- `app/portals/portal-form.tsx` — env picker (FormData-based; added `useState` + hidden `<input type="hidden" name="env">` so submit still picks up the value)
+- `app/import/source-uploader.tsx` — portal picker + the reusable `SelectField` helper (delimiter/encoding overrides in the CSV upload form)
+- `app/import/profile-panel.tsx` — profile load dropdown
+- `app/import/execute-panel.tsx` — publish mode selector
+- `app/import/schema-infer-panel.tsx` — type + FK target dropdowns
+- `app/import/mapping-editor.tsx` — target picker, `AssignmentSelect` (three-way unmapped/ignored/target with disabled options), `SelectField` (hs_name/hs_path), and all six FK-panel selects (source / matchKey / multi / delimiter / onMissing / matching)
+
+224 vitest cases still green (UI-only), tsc + lint clean; every route (`/`, `/portals`, `/import`, `/docs`, `/jobs`) still serves 200
+
+**B. `/docs` walkthrough step 3 rewritten** to spell out the two-button flow on the schema planner: **Generate plan** = preview (POST `/api/portals/[id]/diff` → four per-table verdicts `create / match / update / conflict`, no writes), then **Provision** = actual write (POST `/api/portals/[id]/provision`, only enabled when the plan has zero conflicts, topological order, draft-only). The old copy conflated the two into a single "click Provision" instruction which confused first-time users — now the diff-then-commit safety pattern is explicit
+
+**Files touched:** `components/ui/select.tsx` (new, via shadcn CLI + auto-picked Base UI deps `@base-ui/react`), `app/portals/portal-form.tsx`, `app/import/source-uploader.tsx`, `app/import/profile-panel.tsx`, `app/import/execute-panel.tsx`, `app/import/schema-infer-panel.tsx`, `app/import/mapping-editor.tsx`, `app/docs/page.tsx`. 224 vitest cases still green, tsc + lint clean
+
+**Design decisions worth remembering (Base UI Select quirks — these will bite next time):**
+- **`onValueChange` fires with `string | null`** (null on deselect / clear), not just `string`. Every handler needs a `(v) => v && ...` or `(v) => setX(v ?? "")` guard. Base UI's Select isn't a drop-in Radix substitute even though the surface looks identical
+- **Empty-string values are reserved** for the "no selection" state. Items that need to represent "unset / none / auto" have to use a sentinel constant that maps back to `""` at the FormData / caller boundary. Codebase now has three: `AUTO_SENTINEL = "__auto__"` (source-uploader), `NONE_SENTINEL = "__none__"` (mapping-editor SelectField), `UNMAPPED_SENTINEL = "__unmapped__"` (mapping-editor AssignmentSelect). Kept file-local for now — if we grow more, pull into a shared `lib/ui-sentinels.ts`
+- **FormData-participating selects use a hidden `<input>`, not the Select's `name` prop.** Base UI Select does render a hidden native select when `name` is set, but the behavior around empty-string values makes it awkward for our "auto" placeholder pattern. Explicit `<input type="hidden">` is easier to reason about
+- **shadcn's default `select.tsx` imports match the repo's non-standard setup** (`from "cn"` for the util, `from "@base-ui/react/select"` for the primitive). The generated file works as-is; don't rewrite the imports to match the "canonical" `@/lib/utils` pattern — the repo's `lib/utils.ts` is literally a one-liner re-export from `"cn"`
+
+---
+
+## Prior state — 2026-09-24 (late evening)
+
+**Phase 2 — schema inference from CSV shipped.** Fourth Phase-2 epic ticked (all four checkboxes on the "Schema inference" block in `phases/phase-2.md`). Users can now upload CSVs and get a working schema.json without hand-authoring the JSON.
+
+1. **`lib/schema-infer.ts` (new)** — pure `inferSchema(sources)` returns `InferredTable[]` with per-column type inferred from cell samples. Rules ordered most-specific first: DATE (`YYYY-MM-DD`) → DATETIME (parses + has time-of-day) → BOOLEAN → URL (http/https) → IMAGE (URL + image extension `.png/.jpe?g/.gif/.webp/.svg/.avif/.bmp/.ico`) → CURRENCY (numeric + column-name hint like `price/cost/amount/total/revenue/salary/fee/rate`) → NUMBER → RICHTEXT (any cell > 500 chars) → TEXT. Natural-key picker: fully-unique columns (case-insensitive dedupe) with ≥50% fill ratio; preference tier by name (`id`, `uuid`, `sku`, `slug`, `handle`, `code`, `key`, `identifier`, then `*_id`, then others). FK detection is a **value-membership check** (not a name heuristic): all non-empty values of column A must appear in table B's naturalKey column, case-insensitive; all-or-nothing per column. Second helper `toSchema(tables)` converts the inferred shape to the v1 schema the F3 provisioner accepts, stripping UI-only annotations (`isNaturalKey`, `reason`). 21 vitest cases cover every type branch, NK priority ordering (id > sku > handle), FK false-positive guards (case-insensitive match, subset check, NK never flagged as FK), and `toSchema` field-stripping
+2. **`SchemaInferPanel` (new)** — client component rendered above the mapping cards on `/import` once any source is parsed. Collapsed by default with a "Review + download" primary button and a header summary line ("N tables · M natural keys · K foreign-key links"). Expanded view: per-table card with an editable label input, live counts, and a column table with per-row **type dropdown** (10 options incl. FOREIGN_ID), **natural-key checkbox** (single-column NK for now — composite still hand-editable in the JSON), **FK target picker** (only enabled when type = FOREIGN_ID; lists sibling tables that have a naturalKey; auto-defaults `foreignColumn` to the target's NK), and a **reason column** ("all values match YYYY-MM-DD", "every value found in brands.slug", etc.). Reset button restores the inferred baseline; Download emits a pretty-printed `schema.json`
+3. **Wired into `source-uploader.tsx`** — panel slots in between the top-of-Results header and the ImportOrderPanel. Renders even before a target portal is picked (schema authoring is independent of the F3 diff), so a user can arrive with just CSVs, download `schema.json`, then paste into the schema planner
+4. **State-reset pattern chosen deliberately** — panel's editable state re-derives when the upload fingerprint (`table names + row counts`) changes. Used the React sanctioned "setState during render, guarded by a committed-value check" pattern instead of a `useEffect` (which trips ESLint's `react-hooks/set-state-in-effect`). One-shot re-derive, no double-render
+
+**Files touched:** `lib/schema-infer.ts` (new), `lib/schema-infer.test.ts` (new), `app/import/schema-infer-panel.tsx` (new), `app/import/source-uploader.tsx` (import + slot), `phases/phase-2.md` (four checkboxes ticked). 224 vitest cases green (+21), tsc + lint clean
+
+**Design decisions worth remembering:**
+- **FK detection uses value membership, not name heuristics.** A column named `brand` doesn't imply an FK — it might be a free-text field. Instead, we check if every non-empty value of `products.brand` appears in `brands.slug` (case-insensitive). Zero false positives at the cost of missing FKs where the source data has typos or unresolvable rows — a fair trade for a UI that's optional and pre-execution
+- **Type inference is conservative — TEXT is the fallback for anything ambiguous.** Every stricter type requires *all* non-empty samples to match. One bad row rules out DATE/NUMBER/etc. Users can bump a mixed column up to a stricter type by hand in the panel; over-inferring would just create HubSpot validation errors later
+- **Panel renders before the portal picker resolves.** Schema authoring doesn't need the portal — it's data-source-only. So the "get a schema.json" flow doesn't wait on `fetchPortalSchema`, meaning a user can grab their schema from CSVs alone and use it in a different context (paste into a JSON editor, commit to a repo, etc.) if they want to
+- **`setState-during-render` reset instead of `useEffect`.** ESLint's `react-hooks/set-state-in-effect` rule flags the naive "reset state when fingerprint changes" effect pattern. The alternative (comparing committed-value in render and calling setState conditionally) is documented in the React docs as the correct pattern for prop-driven resets — one re-render, no cascade
+
+**Still open on `phases/phase-2.md`:**
+- Resume from failure (Inngest per `docs/long-job-runner.md`)
+- XLSX + Google Sheets sources
+- F11 tail — re-run saved mapping against a new file / different portal
+- Full cycle handling — two-phase write for cyclic FK graphs, self-reference end-to-end
+- (Provision-writes-back-tableId — Phase-1 F3 polish carried over)
+
+**Next up (unblocked):**
+- **Deploy to Vercel** — everything ready (`DEPLOYMENT.md` + `vercel.json`); manual step is the only remaining lift
+- **XLSX source** — new source type, sheet-per-table detection; drop-in extension to `/api/sources/*`
+- **Resume from failure** — bigger; needs Inngest wiring per `docs/long-job-runner.md`
+
+---
+
+## Prior state — 2026-09-24 (evening)
 
 **`/docs` guide + downloadable example dataset shipped.** New end-user-facing walkthrough page with a scroll-spy TOC, a fifth sidebar nav item, and a small relational dataset served from `public/examples/` so a new user can go from zero to a full sandbox run without touching any code.
 

@@ -27,10 +27,10 @@
 - [ ] Self-referencing table (parent/child) supported end-to-end
 
 ## Schema inference
-- [ ] Infer starting schema from CSV headers
-- [ ] Type inference: TEXT / NUMBER / DATE / CURRENCY / URL / IMAGE from cell samples
-- [ ] UI to correct inferred types before provisioning
-- [ ] Export inferred schema as schema definition JSON
+- [x] Infer starting schema from CSV headers (`lib/schema-infer.ts::inferSchema` — pure, 21 vitest cases)
+- [x] Type inference: TEXT / RICHTEXT / NUMBER / CURRENCY / BOOLEAN / DATE / DATETIME / URL / IMAGE / FOREIGN_ID from cell samples (currency = numeric + name-hint; image = URL + image extension; FK = cross-table value membership)
+- [x] UI to correct inferred types before provisioning (`SchemaInferPanel` on `/import` — per-column type dropdown, natural-key checkbox, FK target picker; live counts of inferred NKs + FKs in the header)
+- [x] Export inferred schema as schema definition JSON (`toSchema` strips UI-only fields; client-side blob download named `schema.json`)
 
 ## XLSX source
 - [ ] Upload endpoint for `.xlsx`

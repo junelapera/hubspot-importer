@@ -2,6 +2,13 @@
 
 import { startTransition, useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import type { MappingState } from "@/lib/mapping";
 import {
   nextCopyName,
@@ -279,21 +286,24 @@ export function ProfilePanel({
         <div className="space-y-2">
           <label className="text-xs font-medium">Load existing</label>
           <div className="flex flex-wrap items-center gap-2">
-            <select
+            <Select
               value={selected}
-              onChange={(e) => setSelected(e.target.value)}
+              onValueChange={(v) => setSelected(v ?? "")}
               disabled={profiles.length === 0}
-              className="min-w-[12rem] flex-1 rounded-md border border-input bg-background px-2 py-1.5 text-sm"
             >
-              <option value="">
-                {profiles.length === 0 ? "no profiles yet" : "— pick a profile —"}
-              </option>
-              {profiles.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name}
-                </option>
-              ))}
-            </select>
+              <SelectTrigger size="sm" className="min-w-[12rem] flex-1">
+                <SelectValue
+                  placeholder={profiles.length === 0 ? "no profiles yet" : "— pick a profile —"}
+                />
+              </SelectTrigger>
+              <SelectContent>
+                {profiles.map((p) => (
+                  <SelectItem key={p.id} value={p.id}>
+                    {p.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
             <Button variant="outline" size="sm" onClick={load} disabled={!selected}>
               Load
             </Button>

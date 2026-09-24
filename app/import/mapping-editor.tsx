@@ -3,6 +3,13 @@
 import { useMemo } from "react";
 import type { HubdbColumn, HubdbTable } from "@/lib/hubdb";
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
   autoMap,
   countResolvable,
   detectTypeMismatch,
@@ -156,18 +163,21 @@ export function MappingEditor({
       <div className="grid gap-3 sm:grid-cols-2">
         <label className="flex flex-col gap-1 text-sm">
           <span className="font-medium">Target HubDB table</span>
-          <select
-            value={value.targetTableName ?? ""}
-            onChange={(e) => chooseTarget(e.target.value)}
-            className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/50"
+          <Select
+            value={value.targetTableName ?? undefined}
+            onValueChange={(v) => v && chooseTarget(v)}
           >
-            <option value="">— pick a table —</option>
-            {portalTables.map((t) => (
-              <option key={t.id} value={t.name}>
-                {t.label ?? t.name} ({t.name})
-              </option>
-            ))}
-          </select>
+            <SelectTrigger className="w-full">
+              <SelectValue placeholder="— pick a table —" />
+            </SelectTrigger>
+            <SelectContent>
+              {portalTables.map((t) => (
+                <SelectItem key={t.id} value={t.name}>
+                  {t.label ?? t.name} ({t.name})
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
           {value.targetTableId ? (
             <span className="text-xs text-muted-foreground">
               id <code className="rounded bg-muted px-1">{value.targetTableId}</code> — cached in profile
@@ -352,16 +362,19 @@ function ForeignKeyPanel({
       <div className="grid gap-3 sm:grid-cols-2">
         <label className="flex flex-col gap-1">
           <span className="font-medium">Foreign source table</span>
-          <select
-            value={cfg.sourceTable ?? ""}
-            onChange={(e) => onChange({ sourceTable: e.target.value || null, matchKey: null })}
-            className="w-full rounded-md border border-input bg-background px-2 py-1 outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/50"
+          <Select
+            value={cfg.sourceTable ?? undefined}
+            onValueChange={(v) => onChange({ sourceTable: v, matchKey: null })}
           >
-            <option value="">— pick a sibling source —</option>
-            {siblingSources.map((s) => (
-              <option key={s.name} value={s.name}>{s.name}</option>
-            ))}
-          </select>
+            <SelectTrigger size="sm" className="w-full">
+              <SelectValue placeholder="— pick a sibling source —" />
+            </SelectTrigger>
+            <SelectContent>
+              {siblingSources.map((s) => (
+                <SelectItem key={s.name} value={s.name}>{s.name}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
           <span className="text-[10px] text-muted-foreground">
             Sibling parsed source whose row ids we&apos;ll substitute into this cell.
           </span>
@@ -369,17 +382,20 @@ function ForeignKeyPanel({
 
         <label className="flex flex-col gap-1">
           <span className="font-medium">Match key column</span>
-          <select
-            value={cfg.matchKey ?? ""}
-            onChange={(e) => onChange({ matchKey: e.target.value || null })}
+          <Select
+            value={cfg.matchKey ?? undefined}
+            onValueChange={(v) => onChange({ matchKey: v })}
             disabled={!foreignSource}
-            className="w-full rounded-md border border-input bg-background px-2 py-1 outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/50"
           >
-            <option value="">— pick a column —</option>
-            {foreignSource?.headers.map((h) => (
-              <option key={h} value={h}>{h}</option>
-            ))}
-          </select>
+            <SelectTrigger size="sm" className="w-full">
+              <SelectValue placeholder="— pick a column —" />
+            </SelectTrigger>
+            <SelectContent>
+              {foreignSource?.headers.map((h) => (
+                <SelectItem key={h} value={h}>{h}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
           <span className="text-[10px] text-muted-foreground">
             Foreign-source column whose values appear inside <code className="rounded bg-muted px-1">{sourceCol}</code>.
           </span>
@@ -389,52 +405,68 @@ function ForeignKeyPanel({
       <div className="grid gap-3 sm:grid-cols-4">
         <label className="flex flex-col gap-1">
           <span className="font-medium">Multi-value</span>
-          <select
+          <Select
             value={cfg.multi ? "yes" : "no"}
-            onChange={(e) => onChange({ multi: e.target.value === "yes" })}
-            className="w-full rounded-md border border-input bg-background px-2 py-1 outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/50"
+            onValueChange={(v) => onChange({ multi: v === "yes" })}
           >
-            <option value="no">single</option>
-            <option value="yes">multiple</option>
-          </select>
+            <SelectTrigger size="sm" className="w-full">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="no">single</SelectItem>
+              <SelectItem value="yes">multiple</SelectItem>
+            </SelectContent>
+          </Select>
         </label>
         <label className="flex flex-col gap-1">
           <span className="font-medium">Delimiter</span>
-          <select
+          <Select
             value={cfg.delimiter}
             disabled={!cfg.multi}
-            onChange={(e) => onChange({ delimiter: e.target.value as Delimiter })}
-            className="w-full rounded-md border border-input bg-background px-2 py-1 outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/50"
+            onValueChange={(v) => onChange({ delimiter: v as Delimiter })}
           >
-            <option value=",">, (comma)</option>
-            <option value="|">| (pipe)</option>
-            <option value=";">; (semicolon)</option>
-            <option value={"\n"}>\n (newline)</option>
-          </select>
+            <SelectTrigger size="sm" className="w-full">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value=",">, (comma)</SelectItem>
+              <SelectItem value="|">| (pipe)</SelectItem>
+              <SelectItem value=";">; (semicolon)</SelectItem>
+              <SelectItem value={"\n"}>\n (newline)</SelectItem>
+            </SelectContent>
+          </Select>
         </label>
         <label className="flex flex-col gap-1">
           <span className="font-medium">On missing</span>
-          <select
+          <Select
             value={cfg.onMissing}
-            onChange={(e) => onChange({ onMissing: e.target.value as FkOnMissing })}
-            className="w-full rounded-md border border-input bg-background px-2 py-1 outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/50"
+            onValueChange={(v) => onChange({ onMissing: v as FkOnMissing })}
           >
-            <option value="fail">fail</option>
-            <option value="skip-row">skip row</option>
-            <option value="null">null the cell</option>
-            <option value="create-stub">create stub</option>
-          </select>
+            <SelectTrigger size="sm" className="w-full">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="fail">fail</SelectItem>
+              <SelectItem value="skip-row">skip row</SelectItem>
+              <SelectItem value="null">null the cell</SelectItem>
+              <SelectItem value="create-stub">create stub</SelectItem>
+            </SelectContent>
+          </Select>
         </label>
         <label className="flex flex-col gap-1">
           <span className="font-medium">Matching</span>
-          <select
+          <Select
             value={cfg.matching}
-            onChange={(e) => onChange({ matching: e.target.value as FkMatching })}
-            className="w-full rounded-md border border-input bg-background px-2 py-1 outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/50"
+            onValueChange={(v) => onChange({ matching: v as FkMatching })}
           >
-            <option value="default">default (trim + casefold)</option>
-            <option value="strict">strict</option>
-          </select>
+            <SelectTrigger size="sm" className="w-full">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="default">default (trim + casefold)</SelectItem>
+              <SelectItem value="strict">strict</SelectItem>
+            </SelectContent>
+          </Select>
         </label>
       </div>
 
@@ -481,6 +513,8 @@ function sampleSummary(sample: string[]): string {
   return joined.length > 60 ? joined.slice(0, 60) + "…" : joined;
 }
 
+const UNMAPPED_SENTINEL = "__unmapped__";
+
 function AssignmentSelect({
   assignment,
   targetColumns,
@@ -493,32 +527,41 @@ function AssignmentSelect({
   onChange: (a: ColumnAssignment) => void;
 }) {
   const currentValue =
-    assignment.kind === "mapped" ? `col:${assignment.targetColumn}` : assignment.kind === "ignored" ? "ignored" : "";
+    assignment.kind === "mapped"
+      ? `col:${assignment.targetColumn}`
+      : assignment.kind === "ignored"
+        ? "ignored"
+        : UNMAPPED_SENTINEL;
   return (
-    <select
+    <Select
       value={currentValue}
-      onChange={(e) => {
-        const v = e.target.value;
-        if (v === "ignored") onChange({ kind: "ignored" });
-        else if (v === "") onChange({ kind: "unmapped" });
+      onValueChange={(v) => {
+        if (!v || v === UNMAPPED_SENTINEL) onChange({ kind: "unmapped" });
+        else if (v === "ignored") onChange({ kind: "ignored" });
         else onChange({ kind: "mapped", targetColumn: v.replace(/^col:/, "") });
       }}
-      className="w-full rounded-md border border-input bg-background px-2 py-1 text-xs outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/50"
     >
-      <option value="">— unmapped —</option>
-      <option value="ignored">— ignored —</option>
-      {targetColumns.map((c) => {
-        const isClaimed = claimed.has(c.name);
-        return (
-          <option key={c.id} value={`col:${c.name}`} disabled={isClaimed}>
-            {c.name}
-            {isClaimed ? " (in use)" : ""}
-          </option>
-        );
-      })}
-    </select>
+      <SelectTrigger size="sm" className="w-full">
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent>
+        <SelectItem value={UNMAPPED_SENTINEL}>— unmapped —</SelectItem>
+        <SelectItem value="ignored">— ignored —</SelectItem>
+        {targetColumns.map((c) => {
+          const isClaimed = claimed.has(c.name);
+          return (
+            <SelectItem key={c.id} value={`col:${c.name}`} disabled={isClaimed}>
+              {c.name}
+              {isClaimed ? " (in use)" : ""}
+            </SelectItem>
+          );
+        })}
+      </SelectContent>
+    </Select>
   );
 }
+
+const NONE_SENTINEL = "__none__";
 
 function SelectField({
   label,
@@ -533,19 +576,26 @@ function SelectField({
   onChange: (v: string) => void;
   options: { value: string; label: string }[];
 }) {
+  const current = value === "" ? NONE_SENTINEL : value;
   return (
     <label className="flex flex-col gap-1 text-sm">
       <span className="font-medium">{label}</span>
-      <select
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        className="w-full rounded-md border border-input bg-background px-2 py-1 text-sm outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/50"
+      <Select
+        value={current}
+        onValueChange={(v) => onChange(!v || v === NONE_SENTINEL ? "" : v)}
       >
-        <option value="">— none —</option>
-        {options.map((o) => (
-          <option key={o.value} value={o.value}>{o.label}</option>
-        ))}
-      </select>
+        <SelectTrigger size="sm" className="w-full">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value={NONE_SENTINEL}>— none —</SelectItem>
+          {options.map((o) => (
+            <SelectItem key={o.value} value={o.value}>
+              {o.label}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
       {hint ? <span className="text-[10px] text-muted-foreground">{hint}</span> : null}
     </label>
   );
