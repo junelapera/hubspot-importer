@@ -290,6 +290,7 @@ export function ProfilePanel({
               value={selected}
               onValueChange={(v) => setSelected(v ?? "")}
               disabled={profiles.length === 0}
+              items={profiles.map((p) => ({ value: p.id, label: p.name }))}
             >
               <SelectTrigger size="sm" className="min-w-[12rem] flex-1">
                 <SelectValue

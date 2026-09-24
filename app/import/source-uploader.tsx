@@ -167,6 +167,10 @@ export function SourceUploader({ portals }: { portals: PortalSummary[] }) {
           value={portalId}
           onValueChange={(v) => setPortalId(v ?? "")}
           disabled={portals.length === 0}
+          items={portals.map((p) => ({
+            value: p.id,
+            label: `${p.label} · ${p.env}${p.hubId ? ` · Hub ${p.hubId}` : ""}`,
+          }))}
         >
           <SelectTrigger className="w-full max-w-sm">
             <SelectValue placeholder={portals.length === 0 ? "No portals available" : "Pick a portal"} />
@@ -389,7 +393,15 @@ function SelectField({
     <label className="flex flex-col gap-1 text-sm">
       <span className="font-medium">{label}</span>
       <input type="hidden" name={name} value={formValue} />
-      <Select value={value} onValueChange={(v) => setValue(v ?? AUTO_SENTINEL)} disabled={disabled}>
+      <Select
+        value={value}
+        onValueChange={(v) => setValue(v ?? AUTO_SENTINEL)}
+        disabled={disabled}
+        items={options.map((o) => ({
+          value: o.value === "" ? AUTO_SENTINEL : o.value,
+          label: o.label,
+        }))}
+      >
         <SelectTrigger className="w-full">
           <SelectValue />
         </SelectTrigger>

@@ -293,6 +293,10 @@ function ColumnRow({
             <Select
               value={column.foreignTable ?? ""}
               onValueChange={(v) => v && onForeignTableChange(v)}
+              items={foreignChoices.map((t) => ({
+                value: t.name,
+                label: `${t.name} · ${t.naturalKey}`,
+              }))}
             >
               <SelectTrigger size="sm">
                 <SelectValue placeholder="pick target" />

@@ -166,6 +166,10 @@ export function MappingEditor({
           <Select
             value={value.targetTableName ?? undefined}
             onValueChange={(v) => v && chooseTarget(v)}
+            items={portalTables.map((t) => ({
+              value: t.name,
+              label: `${t.label ?? t.name} (${t.name})`,
+            }))}
           >
             <SelectTrigger className="w-full">
               <SelectValue placeholder="— pick a table —" />
@@ -408,6 +412,10 @@ function ForeignKeyPanel({
           <Select
             value={cfg.multi ? "yes" : "no"}
             onValueChange={(v) => onChange({ multi: v === "yes" })}
+            items={[
+              { value: "no", label: "single" },
+              { value: "yes", label: "multiple" },
+            ]}
           >
             <SelectTrigger size="sm" className="w-full">
               <SelectValue />
@@ -424,6 +432,12 @@ function ForeignKeyPanel({
             value={cfg.delimiter}
             disabled={!cfg.multi}
             onValueChange={(v) => onChange({ delimiter: v as Delimiter })}
+            items={[
+              { value: ",", label: ", (comma)" },
+              { value: "|", label: "| (pipe)" },
+              { value: ";", label: "; (semicolon)" },
+              { value: "\n", label: "\\n (newline)" },
+            ]}
           >
             <SelectTrigger size="sm" className="w-full">
               <SelectValue />
@@ -441,6 +455,12 @@ function ForeignKeyPanel({
           <Select
             value={cfg.onMissing}
             onValueChange={(v) => onChange({ onMissing: v as FkOnMissing })}
+            items={[
+              { value: "fail", label: "fail" },
+              { value: "skip-row", label: "skip row" },
+              { value: "null", label: "null the cell" },
+              { value: "create-stub", label: "create stub" },
+            ]}
           >
             <SelectTrigger size="sm" className="w-full">
               <SelectValue />
@@ -458,6 +478,10 @@ function ForeignKeyPanel({
           <Select
             value={cfg.matching}
             onValueChange={(v) => onChange({ matching: v as FkMatching })}
+            items={[
+              { value: "default", label: "default (trim + casefold)" },
+              { value: "strict", label: "strict" },
+            ]}
           >
             <SelectTrigger size="sm" className="w-full">
               <SelectValue />
@@ -540,6 +564,14 @@ function AssignmentSelect({
         else if (v === "ignored") onChange({ kind: "ignored" });
         else onChange({ kind: "mapped", targetColumn: v.replace(/^col:/, "") });
       }}
+      items={[
+        { value: UNMAPPED_SENTINEL, label: "— unmapped —" },
+        { value: "ignored", label: "— ignored —" },
+        ...targetColumns.map((c) => ({
+          value: `col:${c.name}`,
+          label: `${c.name}${claimed.has(c.name) ? " (in use)" : ""}`,
+        })),
+      ]}
     >
       <SelectTrigger size="sm" className="w-full">
         <SelectValue />
@@ -583,6 +615,10 @@ function SelectField({
       <Select
         value={current}
         onValueChange={(v) => onChange(!v || v === NONE_SENTINEL ? "" : v)}
+        items={[
+          { value: NONE_SENTINEL, label: "— none —" },
+          ...options,
+        ]}
       >
         <SelectTrigger size="sm" className="w-full">
           <SelectValue />

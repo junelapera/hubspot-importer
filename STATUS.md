@@ -2,16 +2,35 @@
 
 Running log of where the HubDB Importer project is, what's in flight, and what's next. Update as we go.
 
-## Current state — 2026-09-25 (evening)
+## Current state — 2026-09-25 (late evening)
 
-**Fix — Base UI Select trigger showed raw value instead of the item's label.** The Target portal picker read as a raw uuid (`a2c22af5-51c8-4e59-90fc-7fd77be062f2`) instead of the human name; same class of bug affected any Select whose `<SelectItem>` had mixed JSX children (e.g. `{p.label} · {p.env}` or `{t.name} ({t.name})`). Base UI's `Select.Value` shows `Select.Item.label` when set, else falls back to stringifying `value` — plain-string children happen to auto-populate `label`, but as soon as children contain expressions the auto-derive breaks.
+**Second-try fix on Base UI Select trigger.** The `deriveItemLabel` + `label={derivedLabel}` change from the earlier evening entry (commit `cbf08c1`) didn't actually solve the trigger-display issue — the `Select.Item.label` prop in Base UI is for **keyboard text-navigation matching** ("type 's' to jump to 'sandbox'"), NOT the trigger display. Trigger display comes from `Select.Root`'s `items` prop, or from a `children` render function on `Select.Value`. Without either, `Select.Value` stringifies the raw `value` (uuid, sentinel, whatever). Confirmed by reading `@base-ui/react/select`'s type definitions after the user reported the uuid still showing.
 
-**Fix in `components/ui/select.tsx`** — added a `deriveItemLabel(children)` helper that walks the React children tree (strings, numbers, arrays, and one level into element `props.children`) and collects a plain-string label. `SelectItem` wrapper now sets `label={label ?? deriveItemLabel(children)}` on the primitive, and accepts an explicit `label` prop as an escape hatch for cases with icons / non-string content the walker can't flatten. Every existing call site works without changes: id-valued items now show their friendly names in the trigger; simple string-children items are unchanged
+**Real fix — pass `items` prop to `Select.Root` at each call site with a value→label mismatch:**
+- `source-uploader.tsx` Target portal picker — `items` maps `p.id → "{p.label} · {p.env} · Hub {p.hubId}"`
+- `source-uploader.tsx` `SelectField` helper (delimiter/encoding) — `items` derived from `options`, with `AUTO_SENTINEL` remap for the empty-value case
+- `profile-panel.tsx` profile picker — `items` maps `p.id → p.name`
+- `mapping-editor.tsx` target-table picker — `items` maps `t.name → "{t.label} ({t.name})"`
+- `mapping-editor.tsx` `AssignmentSelect` (three-way per-column mapping) — `items` includes unmapped/ignored sentinels + `col:{name}` entries with "(in use)" suffix on claimed targets
+- `mapping-editor.tsx` `SelectField` (hs_name/hs_path picker) — `items` prepends the NONE_SENTINEL entry to caller-supplied options
+- `mapping-editor.tsx` ForeignKeyPanel — multi/delimiter/onMissing/matching all get `items` arrays with the friendly labels ("single/multiple", ", (comma)", "null the cell", "default (trim + casefold)", etc.)
+- `schema-infer-panel.tsx` FK target picker — `items` maps `t.name → "{t.name} · {t.naturalKey}"`
+- `execute-panel.tsx` publish-mode selector — `items` for "none (draft only) / foreign tables only / all"
 
-**Files touched:** `components/ui/select.tsx`. 224 vitest cases still green, tsc + lint clean
+Kept the `deriveItemLabel` + `label={...}` change on the shadcn `SelectItem` wrapper (commit `cbf08c1`) — that's still useful for keyboard nav. Reverted a short-lived context-registry attempt (would have auto-wired trigger display from `SelectItem` children) after discovering it can't work: Base UI renders `SelectItem`s inside a lazy Portal that only mounts when the popover opens, so on first render the registry is empty and the trigger has nothing to display
 
-**Design decision worth remembering:**
-- **Fixed in the shadcn wrapper, not per-call-site.** Alternative was to sweep every `<SelectItem>` and add `label={`${p.label} · ${p.env}`}` alongside children — dozens of edits, easy to forget on a new dropdown. Deriving the label once in the wrapper means new code just writes the natural JSX and it works. The `label` prop remains available as an override for the rare complex-children case (icons, badges) where the walker can't produce a clean string
+**Files touched:** `app/import/source-uploader.tsx`, `app/import/profile-panel.tsx`, `app/import/mapping-editor.tsx`, `app/import/schema-infer-panel.tsx`, `app/import/execute-panel.tsx`. 224 vitest cases still green, tsc + lint clean
+
+**Design decisions worth remembering:**
+- **`items` prop is Base UI's intended API for value→label mapping.** It pre-declares the mapping at Root level, so `Select.Value` can render the trigger before any Item mounts. Popup children (`<SelectItem>`) remain the source of truth for the popover list; `items` is a parallel declaration purely for trigger display. Yes it's a duplication, but the two shapes differ enough (popup wants rich JSX for the "(in use)" badge, trigger wants a plain string) that a single source doesn't map cleanly
+- **Portal-mount-lazy is the trap.** Any "auto-wire from SelectItem children" solution — via Context, Refs, or a global registry — fails because Portal doesn't render children until open. This is documented in Base UI but not obvious from the API surface. Rule of thumb for future Base UI work: assume Portal-rendered subtrees don't exist until opened
+- **`SelectItem.label` prop kept on the wrapper.** Even though it doesn't fix the trigger, it's still the correct place for the keyboard-text-nav label. Wrapper's `deriveItemLabel` covers most cases automatically
+
+---
+
+## Prior state — 2026-09-25 (evening — superseded by the late-evening fix above)
+
+**Fix — Base UI Select trigger showed raw value instead of the item's label.** ~~Fixed in the shadcn wrapper by walking children~~ Fix was incomplete — see the late-evening entry above for the actual working fix via `items` prop. Keeping this entry for the historical trail on why the wrapper-based approach seemed right but wasn't
 
 ---
 

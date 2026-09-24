@@ -147,6 +147,11 @@ export function ExecutePanel({
               value={publish}
               onValueChange={(v) => setPublish(v as PublishMode)}
               disabled={stage.kind === "running"}
+              items={[
+                { value: "none", label: "none (draft only)" },
+                { value: "foreign-only", label: "foreign tables only" },
+                { value: "all", label: "all" },
+              ]}
             >
               <SelectTrigger size="sm">
                 <SelectValue />
