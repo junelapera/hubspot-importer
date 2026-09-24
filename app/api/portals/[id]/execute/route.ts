@@ -20,10 +20,16 @@ import { createMapping, getMappingById } from "@/lib/db/mappings";
 import {
   completeJob,
   createJob,
+  getJobById,
   insertJobErrors,
   type JobTableTotals,
   type JobTotals,
 } from "@/lib/db/jobs";
+import {
+  recordBatchComplete,
+  recordBatchStart,
+} from "@/lib/db/job-batches";
+import { upsertKeyMap } from "@/lib/db/key-maps";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 export const runtime = "nodejs";
@@ -38,6 +44,10 @@ const Body = z.object({
   mappings: z.record(z.string(), z.unknown()),
   publish: z.enum(["none", "foreign-only", "all"]).optional().default("none"),
   profileId: z.string().uuid().optional(),
+  // When set, this run resumes a previously-failed job — reuses its
+  // jobId + mapping instead of creating new ones so /jobs history + the
+  // job_batches audit trail continue on the same row.
+  resumeJobId: z.string().uuid().optional(),
   // PRD F7 — client must complete a dry run first and echo the returned
   // signature. Prevents an execute against sources/mappings that were
   // never previewed.
@@ -152,21 +162,62 @@ export async function POST(
   // the DB is transiently unreachable, we still run the import and return
   // the result; the response echoes any persistence error so the UI can
   // surface it.
-  const resolved = await resolveMappingId(supabase, id, body.data.profileId, mappings);
   let jobId: string | null = null;
   let persistenceError: string | null = null;
-  if (resolved) {
+  let resolved: { mappingId: string; autoSaved: boolean } | null = null;
+  if (body.data.resumeJobId) {
+    // Resume path: reuse the existing job row + its mapping. Skip
+    // createMapping / createJob entirely so /jobs history stays coherent.
     try {
-      const job = await createJob(supabase, { mappingId: resolved.mappingId, kind: "import" });
-      jobId = job.id;
+      const existing = await getJobById(supabase, body.data.resumeJobId);
+      if (!existing) {
+        return errorResponse(404, `job ${body.data.resumeJobId} not found`);
+      }
+      jobId = existing.id;
     } catch (err) {
-      persistenceError = `job create failed: ${(err as Error).message}`;
+      persistenceError = `resume lookup failed: ${(err as Error).message}`;
     }
   } else {
-    persistenceError = "could not resolve or create a mapping row (has the F11 migration been applied?)";
+    resolved = await resolveMappingId(supabase, id, body.data.profileId, mappings);
+    if (resolved) {
+      try {
+        const job = await createJob(supabase, { mappingId: resolved.mappingId, kind: "import" });
+        jobId = job.id;
+      } catch (err) {
+        persistenceError = `job create failed: ${(err as Error).message}`;
+      }
+    } else {
+      persistenceError = "could not resolve or create a mapping row (has the F11 migration been applied?)";
+    }
   }
 
   const events: ImportEvent[] = [];
+  // Hooks persist per-batch cursors + per-table key maps to Supabase so
+  // a future resume can (a) audit which batches succeeded and (b) skip
+  // re-listing foreign tables. Hooks are best-effort inside importRows;
+  // failures land on stderr via `fireHook` and never abort the run. We
+  // additionally short-circuit if we already know jobId is null.
+  const persistHooks = jobId
+    ? {
+        onBatchStart: async (info: { table: string; batchIndex: number; kind: "create" | "update"; size: number }) =>
+          recordBatchStart(supabase, {
+            jobId: jobId!,
+            tableName: info.table,
+            batchIndex: info.batchIndex,
+            kind: info.kind,
+            size: info.size,
+          }),
+        onBatchComplete: async (info: { table: string; batchIndex: number; kind: "create" | "update"; status: "succeeded" | "failed" }) =>
+          recordBatchComplete(supabase, {
+            jobId: jobId!,
+            tableName: info.table,
+            batchIndex: info.batchIndex,
+            status: info.status,
+          }),
+        onKeyMapReady: async (table: string, entries: Record<string, string>) =>
+          upsertKeyMap(supabase, jobId!, table, entries),
+      }
+    : undefined;
   let result: ImportResult;
   try {
     result = await importRows(
@@ -177,7 +228,7 @@ export async function POST(
         source: synth.source,
         fkOptions: synth.fkOptions,
       },
-      { onEvent: (e) => events.push(e), signal: req.signal },
+      { onEvent: (e) => events.push(e), signal: req.signal, hooks: persistHooks },
     );
   } catch (err) {
     const message =

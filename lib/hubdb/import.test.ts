@@ -731,6 +731,99 @@ describe("importRows", () => {
     expect(base.calls.filter((c) => c.op === "create")).toHaveLength(1);
   });
 
+  it("invokes persistence hooks in order — onBatchStart, onBatchComplete, onKeyMapReady", async () => {
+    const ops = fakeOps();
+    type HookCall =
+      | { kind: "start"; table: string; batchIndex: number; op: "create" | "update"; size: number }
+      | { kind: "complete"; table: string; batchIndex: number; op: "create" | "update"; status: "succeeded" | "failed" }
+      | { kind: "keymap"; table: string; entryCount: number };
+    const hookCalls: HookCall[] = [];
+    await importRows(ops, {
+      schema: brandsProducts,
+      tableIds,
+      source: {
+        brands: [{ name: "Alpha", slug: "brand-a" }],
+        products: [{ sku: "P-1", title: "Widget", brand: "brand-a" }],
+      },
+    }, {
+      hooks: {
+        onBatchStart: async (info) => {
+          hookCalls.push({ kind: "start", table: info.table, batchIndex: info.batchIndex, op: info.kind, size: info.size });
+        },
+        onBatchComplete: async (info) => {
+          hookCalls.push({ kind: "complete", table: info.table, batchIndex: info.batchIndex, op: info.kind, status: info.status });
+        },
+        onKeyMapReady: async (table, entries) => {
+          hookCalls.push({ kind: "keymap", table, entryCount: Object.keys(entries).length });
+        },
+      },
+    });
+    // For each table: start → complete → keymap. Two tables total.
+    expect(hookCalls).toEqual([
+      { kind: "start", table: "brands", batchIndex: 1, op: "create", size: 1 },
+      { kind: "complete", table: "brands", batchIndex: 1, op: "create", status: "succeeded" },
+      { kind: "keymap", table: "brands", entryCount: 1 },
+      { kind: "start", table: "products", batchIndex: 1, op: "create", size: 1 },
+      { kind: "complete", table: "products", batchIndex: 1, op: "create", status: "succeeded" },
+      { kind: "keymap", table: "products", entryCount: 1 },
+    ]);
+  });
+
+  it("emits onBatchComplete(status='failed') and rethrows when a create batch fails hard", async () => {
+    const base = fakeOps();
+    const ops: ImportOps = {
+      ...base,
+      async batchCreateDraftRows(ref) {
+        throw new HubdbError({
+          status: 500,
+          method: "POST",
+          path: `/tables/${String(ref)}/rows/draft/batch/create`,
+          responseBody: { message: "boom" },
+          rateLimit: { remaining: null, retryAfterSeconds: null },
+          attempts: 1,
+        });
+      },
+    };
+    const completed: { status: string; op: string }[] = [];
+    await expect(
+      importRows(ops, {
+        schema: brandsProducts,
+        tableIds,
+        source: {
+          brands: [{ name: "Alpha", slug: "brand-a" }],
+          products: [],
+        },
+      }, {
+        hooks: {
+          onBatchComplete: async (info) => {
+            completed.push({ status: info.status, op: info.kind });
+          },
+        },
+      }),
+    ).rejects.toBeInstanceOf(HubdbError);
+    expect(completed).toEqual([{ status: "failed", op: "create" }]);
+  });
+
+  it("swallows hook errors — an onBatchStart throw does not abort the run", async () => {
+    const ops = fakeOps();
+    const result = await importRows(ops, {
+      schema: brandsProducts,
+      tableIds,
+      source: {
+        brands: [{ name: "Alpha", slug: "brand-a" }],
+        products: [],
+      },
+    }, {
+      hooks: {
+        onBatchStart: async () => {
+          throw new Error("simulated hook failure");
+        },
+      },
+    });
+    expect(result.ok).toBe(true);
+    expect(result.tables[0].created).toBe(1);
+  });
+
   it("propagates the original error when no foreign tables are refreshable", async () => {
     // Brands has no naturalKey → nothing to refresh. Simulate an
     // FK-shaped error and confirm we don't swallow it.

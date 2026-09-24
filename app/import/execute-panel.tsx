@@ -42,6 +42,7 @@ export function ExecutePanel({
   sources,
   mappings,
   profileId,
+  resumeJobId,
   dryRunSignature,
   disabled,
   disabledReason,
@@ -50,6 +51,7 @@ export function ExecutePanel({
   sources: DryRunSource[];
   mappings: Record<string, MappingState>;
   profileId?: string | null;
+  resumeJobId?: string | null;
   dryRunSignature: string | null;
   disabled: boolean;
   disabledReason?: string;
@@ -72,6 +74,7 @@ export function ExecutePanel({
           mappings,
           publish,
           profileId: profileId ?? undefined,
+          resumeJobId: resumeJobId ?? undefined,
           dryRunSignature,
         }),
         signal: controller.signal,

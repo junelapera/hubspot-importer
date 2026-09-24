@@ -79,7 +79,47 @@ export type ImportOptions = {
   onEvent?: (event: ImportEvent) => void;
   /** Aborted between batches — the current in-flight batch always completes. */
   signal?: AbortSignal;
+  /**
+   * Best-effort persistence hooks. Called before + after each HubSpot
+   * batch call and once per table when its natural-key → row-id map is
+   * finalized. Errors thrown from hooks are logged (via `console.warn`)
+   * but never abort the run — durability is a secondary concern to
+   * getting rows into HubDB.
+   */
+  hooks?: ImportHooks;
 };
+
+export type BatchKind = "create" | "update";
+
+export type ImportHooks = {
+  onBatchStart?: (info: {
+    table: string;
+    batchIndex: number;
+    kind: BatchKind;
+    size: number;
+  }) => Promise<void>;
+  onBatchComplete?: (info: {
+    table: string;
+    batchIndex: number;
+    kind: BatchKind;
+    status: "succeeded" | "failed";
+  }) => Promise<void>;
+  /**
+   * Fired when a table finishes its pass-1 (all inserts + updates done)
+   * and its full natural-key → row-id map is available. Consumers use
+   * this to persist the key map so a future resume can skip the
+   * `listAllDraftRows` call for this foreign table.
+   */
+  onKeyMapReady?: (table: string, entries: Record<string, string>) => Promise<void>;
+};
+
+async function fireHook(name: string, fn: () => Promise<void>): Promise<void> {
+  try {
+    await fn();
+  } catch (err) {
+    console.warn(`[importRows] hook ${name} threw:`, (err as Error).message);
+  }
+}
 
 export type ImportEvent =
   | { kind: "table-start"; table: string; sourceCount: number }
@@ -591,11 +631,18 @@ async function importOneTable(
     return refreshed;
   }
 
+  const hooks = opts.hooks;
   const updateBatches = chunk(updates, HUBDB_MAX_BATCH_SIZE);
   for (let i = 0; i < updateBatches.length; i++) {
     checkCancel();
     const batch = updateBatches[i];
-    emit({ kind: "batch-update", table: table.name, batch: i + 1, sent: batch.length });
+    const batchIndex = i + 1;
+    emit({ kind: "batch-update", table: table.name, batch: batchIndex, sent: batch.length });
+    if (hooks?.onBatchStart) {
+      await fireHook("onBatchStart", () =>
+        hooks.onBatchStart!({ table: table.name, batchIndex, kind: "update", size: batch.length }),
+      );
+    }
     const inputs: HubdbRowUpdate[] = batch.map((p) => {
       if (p.kind !== "update") throw new Error("unreachable");
       return { id: p.rowId, values: p.values };
@@ -603,10 +650,29 @@ async function importOneTable(
     try {
       const patched = await ops.batchUpdateDraftRows(tableRef, inputs);
       result.updated += patched.length;
+      if (hooks?.onBatchComplete) {
+        await fireHook("onBatchComplete", () =>
+          hooks.onBatchComplete!({ table: table.name, batchIndex, kind: "update", status: "succeeded" }),
+        );
+      }
     } catch (err) {
-      if (!isPossiblyStaleFkError(err)) throw err;
+      if (!isPossiblyStaleFkError(err)) {
+        if (hooks?.onBatchComplete) {
+          await fireHook("onBatchComplete", () =>
+            hooks.onBatchComplete!({ table: table.name, batchIndex, kind: "update", status: "failed" }),
+          );
+        }
+        throw err;
+      }
       const refreshed = await refreshForeignKeyMaps();
-      if (refreshed.length === 0) throw err;
+      if (refreshed.length === 0) {
+        if (hooks?.onBatchComplete) {
+          await fireHook("onBatchComplete", () =>
+            hooks.onBatchComplete!({ table: table.name, batchIndex, kind: "update", status: "failed" }),
+          );
+        }
+        throw err;
+      }
       emit({ kind: "stale-fk-retry", table: table.name, batchKind: "update", refreshed });
       // Re-plan surviving rows; drop new errors into the result.
       const retryInputs: HubdbRowUpdate[] = [];
@@ -633,6 +699,11 @@ async function importOneTable(
         const patched = await ops.batchUpdateDraftRows(tableRef, retryInputs);
         result.updated += patched.length;
       }
+      if (hooks?.onBatchComplete) {
+        await fireHook("onBatchComplete", () =>
+          hooks.onBatchComplete!({ table: table.name, batchIndex, kind: "update", status: "succeeded" }),
+        );
+      }
     }
   }
 
@@ -640,7 +711,13 @@ async function importOneTable(
   for (let i = 0; i < insertBatches.length; i++) {
     checkCancel();
     const batch = insertBatches[i];
+    const batchIndex = i + 1 + updateBatches.length;
     emit({ kind: "batch-create", table: table.name, batch: i + 1, sent: batch.length });
+    if (hooks?.onBatchStart) {
+      await fireHook("onBatchStart", () =>
+        hooks.onBatchStart!({ table: table.name, batchIndex, kind: "create", size: batch.length }),
+      );
+    }
     const inputs: HubdbRowInput[] = batch.map((p) => {
       if (p.kind !== "insert") throw new Error("unreachable");
       return { values: p.values };
@@ -652,9 +729,23 @@ async function importOneTable(
     try {
       created = await ops.batchCreateDraftRows(tableRef, inputs);
     } catch (err) {
-      if (!isPossiblyStaleFkError(err)) throw err;
+      if (!isPossiblyStaleFkError(err)) {
+        if (hooks?.onBatchComplete) {
+          await fireHook("onBatchComplete", () =>
+            hooks.onBatchComplete!({ table: table.name, batchIndex, kind: "create", status: "failed" }),
+          );
+        }
+        throw err;
+      }
       const refreshed = await refreshForeignKeyMaps();
-      if (refreshed.length === 0) throw err;
+      if (refreshed.length === 0) {
+        if (hooks?.onBatchComplete) {
+          await fireHook("onBatchComplete", () =>
+            hooks.onBatchComplete!({ table: table.name, batchIndex, kind: "create", status: "failed" }),
+          );
+        }
+        throw err;
+      }
       emit({ kind: "stale-fk-retry", table: table.name, batchKind: "create", refreshed });
       const retryInputs: HubdbRowInput[] = [];
       const retrySourceIdxs: number[] = [];
@@ -694,9 +785,20 @@ async function importOneTable(
         if (key) existingKeyMap.set(key, created[j].id);
       }
     }
+    if (hooks?.onBatchComplete) {
+      await fireHook("onBatchComplete", () =>
+        hooks.onBatchComplete!({ table: table.name, batchIndex, kind: "create", status: "succeeded" }),
+      );
+    }
   }
 
   if (hasNk) keyMapsByTable.set(table.name, existingKeyMap);
+
+  if (hasNk && hooks?.onKeyMapReady) {
+    const entries: Record<string, string> = {};
+    for (const [k, v] of existingKeyMap) entries[k] = v;
+    await fireHook("onKeyMapReady", () => hooks.onKeyMapReady!(table.name, entries));
+  }
 
   emit({
     kind: "table-done",

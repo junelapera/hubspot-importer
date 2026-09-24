@@ -76,6 +76,24 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
             </p>
           ) : null}
 
+          {(job.status === "failed" || job.status === "cancelled") && job.portalId && job.mappingId ? (
+            <section className="space-y-2 rounded-md border border-primary/40 bg-primary/5 p-4 text-sm">
+              <h2 className="text-sm font-semibold">Resume this run</h2>
+              <p className="text-xs text-muted-foreground">
+                Reopens the wizard with this job&apos;s mapping profile pre-loaded. Re-upload
+                the same source files, then click <em>Execute</em> — the run continues on
+                this job id, and per-table upserts by natural key skip any rows that
+                already landed in HubDB.
+              </p>
+              <Link
+                href={`/import?resume=${job.id}&portalId=${job.portalId}&mappingId=${job.mappingId}`}
+                className="inline-block rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/80"
+              >
+                Resume in wizard →
+              </Link>
+            </section>
+          ) : null}
+
           {totals ? (
             <section className="space-y-3">
               <h2 className="text-sm font-semibold">

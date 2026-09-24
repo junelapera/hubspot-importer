@@ -77,9 +77,11 @@ export {
   opsFromClientForImport,
 } from "./import";
 export type {
+  BatchKind,
   FkColumnOption,
   FkOnMissing,
   ImportEvent,
+  ImportHooks,
   ImportInput,
   ImportOps,
   ImportOptions,

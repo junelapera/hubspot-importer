@@ -1,6 +1,7 @@
 "use client";
 
 import { startTransition, useEffect, useState, type FormEvent } from "react";
+import { useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import type { PortalSummary } from "@/lib/db/portals";
 import type { HubdbTable } from "@/lib/hubdb";
@@ -52,17 +53,61 @@ type SubmitState =
   | { kind: "success"; response: ParseResponse };
 
 export function SourceUploader({ portals }: { portals: PortalSummary[] }) {
+  const searchParams = useSearchParams();
+  // Resume mode kicks in when /jobs/[id] links here with ?resume=<jobId>&
+  // portalId=<...>&mappingId=<...>. The wizard pre-selects the portal +
+  // auto-loads the mapping profile so the user only has to re-upload the
+  // same source files and click Execute; the resume flag threads through
+  // to /api/portals/[id]/execute which reuses the existing job row.
+  const resumeJobId = searchParams.get("resume");
+  const resumePortalId = searchParams.get("portalId");
+  const resumeMappingId = searchParams.get("mappingId");
+
   const [mode, setMode] = useState<Mode>("csv");
-  const [portalId, setPortalId] = useState<string>(portals[0]?.id ?? "");
+  const [portalId, setPortalId] = useState<string>(
+    resumePortalId ?? portals[0]?.id ?? "",
+  );
   const [state, setState] = useState<SubmitState>({ kind: "idle" });
   const [portalTables, setPortalTables] = useState<HubdbTable[]>([]);
   const [portalSchemaState, setPortalSchemaState] = useState<"idle" | "loading" | "error" | "ready">("idle");
   const [portalSchemaError, setPortalSchemaError] = useState<string | null>(null);
   const [mappings, setMappings] = useState<Record<string, MappingState>>({});
   const [selectedProfileId, setSelectedProfileId] = useState<string | null>(null);
+  const [resumeStatus, setResumeStatus] = useState<null | "loading" | "loaded" | "error">(
+    resumeJobId ? "loading" : null,
+  );
+  const [resumeError, setResumeError] = useState<string | null>(null);
   // Cleared whenever sources/mappings change (either edit or profile load)
   // so ExecutePanel can gate on a fresh dry run.
   const [dryRunSignature, setDryRunSignature] = useState<string | null>(null);
+
+  // Auto-load the linked mapping profile on resume so the wizard is
+  // pre-configured before the user re-uploads sources.
+  useEffect(() => {
+    if (!resumeJobId || !resumeMappingId) return;
+    let cancelled = false;
+    fetch(`/api/mappings/${resumeMappingId}`)
+      .then(async (res) => {
+        const body = (await res.json()) as { profile?: { id: string; state: Record<string, MappingState> }; error?: string };
+        if (cancelled) return;
+        if (!res.ok || !body.profile) {
+          setResumeStatus("error");
+          setResumeError(body.error ?? `HTTP ${res.status}`);
+          return;
+        }
+        setMappings(body.profile.state);
+        setSelectedProfileId(body.profile.id);
+        setResumeStatus("loaded");
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        setResumeStatus("error");
+        setResumeError((err as Error).message);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [resumeJobId, resumeMappingId]);
 
   useEffect(() => {
     if (!portalId) return;
@@ -179,6 +224,21 @@ export function SourceUploader({ portals }: { portals: PortalSummary[] }) {
 
   return (
     <div className="space-y-8">
+      {resumeJobId ? (
+        <section className="space-y-1 rounded-md border border-primary/40 bg-primary/5 p-4 text-sm">
+          <p className="font-semibold">Resuming job {resumeJobId}</p>
+          <p className="text-xs text-muted-foreground">
+            {resumeStatus === "loading"
+              ? "Loading the linked mapping profile…"
+              : resumeStatus === "loaded"
+                ? "Mapping profile pre-loaded. Re-upload the same source files, run the dry run, then Execute — the run continues on the existing job row and upserts by natural key so already-imported rows are no-ops."
+                : resumeStatus === "error"
+                  ? `Could not load the linked mapping profile: ${resumeError}. You can still re-configure the mapping by hand — the resume job id will still be used on Execute.`
+                  : null}
+          </p>
+        </section>
+      ) : null}
+
       <section className="space-y-3">
         <h2 className="text-sm font-semibold">Target portal</h2>
         <Select
@@ -394,6 +454,7 @@ export function SourceUploader({ portals }: { portals: PortalSummary[] }) {
           mappings={mappings}
           onMappingChange={updateMapping}
           profileId={selectedProfileId}
+          resumeJobId={resumeJobId}
           dryRunSignature={dryRunSignature}
           onDryRunComplete={setDryRunSignature}
         />
@@ -506,6 +567,7 @@ function Results({
   mappings,
   onMappingChange,
   profileId,
+  resumeJobId,
   dryRunSignature,
   onDryRunComplete,
 }: {
@@ -517,6 +579,7 @@ function Results({
   mappings: Record<string, MappingState>;
   onMappingChange: (source: string, next: MappingState) => void;
   profileId: string | null;
+  resumeJobId: string | null;
   dryRunSignature: string | null;
   onDryRunComplete: (signature: string) => void;
 }) {
@@ -570,6 +633,7 @@ function Results({
                 sources={allSources}
                 mappings={mappings}
                 profileId={profileId}
+                resumeJobId={resumeJobId}
                 dryRunSignature={dryRunSignature}
                 disabled={false}
                 disabledReason="Run a dry run first — execute is gated on a matching dry-run signature."

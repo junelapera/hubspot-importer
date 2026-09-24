@@ -11,10 +11,10 @@
 - [ ] Re-run saved mapping against a different portal (lookup by name)
 
 ## Resume from failure
-- [ ] Detect interrupted jobs on runner restart
-- [ ] Resume from last completed batch cursor
-- [ ] UI: "resume" action on failed jobs in history
-- [ ] Preserve key map across resume
+- [ ] Detect interrupted jobs on runner restart (Phase 3 — belongs with the Inngest step-function rewrite; the persist-and-resume slice below doesn't require a runner daemon)
+- [x] Resume from last completed batch cursor (`lib/hubdb/import.ts` gains `ImportHooks` — `onBatchStart` / `onBatchComplete` write per-batch rows to `job_batches` via `lib/db/job-batches.ts`. Resume is upsert-idempotent by natural key so re-running just re-classifies prior successes as no-op updates; the audit trail in `job_batches` makes it inspectable)
+- [x] UI: "resume" action on failed jobs in history (Resume button on `/jobs/[id]` for failed / cancelled jobs; deep-links to `/import?resume=<jobId>&portalId=<...>&mappingId=<...>`; wizard auto-selects the portal + auto-loads the mapping profile + shows a banner; `resumeJobId` threads through `ExecutePanel` → `POST /api/portals/[id]/execute` which reuses the existing job row instead of creating a new one)
+- [x] Preserve key map across resume (`onKeyMapReady` hook writes each table's natural-key → row-id map to `key_maps` via `lib/db/key-maps.ts` when pass-1 finishes. `loadKeyMaps` reads them back for future Inngest wiring; the current sync executor rebuilds via `listAllDraftRows` since the resume runs in one request)
 
 ## Stub creation (F5 extension)
 - [ ] Implement `onMissing: create_stub` — insert placeholder row in foreign table

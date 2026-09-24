@@ -2,7 +2,41 @@
 
 Running log of where the HubDB Importer project is, what's in flight, and what's next. Update as we go.
 
-## Current state — 2026-09-26
+## Current state — 2026-09-26 (afternoon)
+
+**Phase 2 — resume from failure shipped (persist-and-resume flavor).** Sixth Phase-2 epic; three of four checkboxes on the "Resume from failure" block are ticked. Skipped "detect interrupted jobs on runner restart" — that belongs with the Phase-3 Inngest step-function rewrite. Chose the persist-and-resume slice over the full Inngest rewrite so we ship user-facing value without pulling in an external service; the persisted state (`job_batches`, `key_maps`) is exactly what Inngest would consume when we layer it on later.
+
+1. **`lib/db/job-batches.ts` (new)** — thin repo. `recordBatchStart` upserts `{job_id, table_name, batch_index, status: "sent", sent_at}` before each HubSpot call (upsert-on-conflict so resume overwrites the same row). `recordBatchComplete` updates status to `succeeded` / `failed` + `finished_at`. `listCompletedBatches(jobId)` returns `{tableName → Set<batchIndex>}` for future skip-logic use
+2. **`lib/db/key-maps.ts` (new)** — `upsertKeyMap(jobId, tableName, entries)` writes the natural-key → row-id map (Record<string, string>) at the end of each table's pass-1. `loadKeyMaps(jobId)` reads back all persisted maps for a job — wired for future Inngest step-function use; the current single-request executor doesn't yet preload from this since `listAllDraftRows` naturally sees the succeeded prior-run rows
+3. **`lib/hubdb/import.ts` gains `ImportHooks`** — three optional callbacks on `ImportOptions.hooks`: `onBatchStart({table, batchIndex, kind, size})` fires before each HubSpot batch call; `onBatchComplete({table, batchIndex, kind, status})` fires after with `succeeded` / `failed`; `onKeyMapReady(table, entries)` fires when pass-1 finalizes the key map. All fired through a `fireHook(name, fn)` wrapper that catches + `console.warn`s errors — persistence is best-effort and never aborts the run. `batchIndex` is monotonic across the update-then-insert loops (update batch 1 → update batch 2 → insert batch 1 gets index 3) so the audit trail reads linearly
+4. **`POST /api/portals/[id]/execute` route** — passes `persistHooks` bound to Supabase when `jobId` is available. New `resumeJobId` field in the request body: if set, skip `resolveMappingId` + `createJob` and reuse the existing job row (verified via `getJobById`, 404 if gone). Non-resume path unchanged. Hooks fire best-effort; hook-side Supabase errors never abort the HubSpot writes
+5. **`app/jobs/[id]/page.tsx` — Resume button** — new primary-color card shown only for `failed` / `cancelled` jobs that still have a `portalId` + `mappingId`. Links to `/import?resume=<jobId>&portalId=<...>&mappingId=<...>`. Explains the semantics inline ("re-upload the same source files, then Execute — upserts by natural key skip already-imported rows")
+6. **`SourceUploader` reads `?resume=` from `useSearchParams`** — auto-selects the portal (via `resumePortalId ?? portals[0]?.id`), fetches the linked mapping profile via `GET /api/mappings/[id]`, injects it into `mappings` state, shows a resume banner with three states (`loading` / `loaded` / `error`), and threads `resumeJobId` through `Results` → `ExecutePanel` → the POST body
+7. **3 new vitest cases** on `importRows` — hooks called in the right order (start → complete → keymap per table), `onBatchComplete(status="failed")` fires when a batch throws and doesn't get swallowed, hook errors don't abort the run (simulated `onBatchStart` throw still lets the create succeed and the result come back with `ok: true`)
+
+**Files touched:** `lib/hubdb/import.ts` (hooks + `fireHook`), `lib/hubdb/index.ts` (barrel export), `lib/hubdb/import.test.ts` (3 new cases), `lib/db/job-batches.ts` (new), `lib/db/key-maps.ts` (new), `app/api/portals/[id]/execute/route.ts` (hooks + resume path), `app/jobs/[id]/page.tsx` (Resume button), `app/import/source-uploader.tsx` (URL params + banner + prop thread), `app/import/execute-panel.tsx` (resumeJobId in body), `phases/phase-2.md` (three checkboxes ticked). 236 vitest cases / 17 suites (+3 net-new), tsc + lint clean
+
+**Design decisions worth remembering:**
+- **Persist-and-resume without Inngest.** Full Inngest rewrite would give tab-close survival + `maxDuration` bypass but requires an Inngest account, INNGEST_EVENT_KEY / SIGNING_KEY env vars, and Vercel routing config. The persist-and-resume slice ships in one session, unlocks the "click Resume, don't lose your wizard state" UX, and writes the exact `job_batches` / `key_maps` rows Inngest will read once we layer it on. Deferred the "detect interrupted jobs on runner restart" checkbox — no daemon in this architecture yet
+- **Hooks are best-effort inside `importRows`.** `fireHook(name, fn)` catches + `console.warn`s any thrown error. Rationale: durability is a secondary concern to actually landing rows in HubDB. If Supabase is transiently unreachable during a run, the HubSpot writes still succeed and the response still comes back; the audit trail in `job_batches` may be incomplete but the primary work is done
+- **`batchIndex` monotonic across update-then-insert.** Update batches get indices 1..M; insert batches get indices M+1..M+N. Alternative was per-kind indexing (updates 1..M, inserts 1..N) which would need a composite key on `(job_id, table_name, batch_index, kind)`. Monotonic keeps the schema simple and the audit trail linear
+- **Upsert idempotency IS the resume mechanism.** Because `importRows` splits source rows into insert/update by looking up their natural key in `existingKeyMap`, a resume run naturally sees prior successes as pre-existing → re-classifies them as no-op updates. No explicit "skip completed batches" logic needed for correctness — the semantics fall out of the executor's upsert design. The persistence layer is for audit + future Inngest wiring, not correctness
+
+**Still open on `phases/phase-2.md`:**
+- Google Sheets source (OAuth + sheet picker + refresh-from-sheet on saved mappings)
+- Full cycle handling — two-phase write for cyclic FK graphs, self-reference end-to-end
+- F11 tail — re-run saved mapping against a different portal
+- Detect interrupted jobs on runner restart (Phase 3 with Inngest)
+- (Provision-writes-back-tableId — Phase-1 F3 polish carried over)
+
+**Next up (unblocked):**
+- **Sandbox smoke test of resume** — run an import to failure, verify the audit trail in `job_batches` + `key_maps`, click Resume from `/jobs/[id]`, confirm the wizard pre-loads and the second run completes
+- **Google Sheets source** — the last "new intake" epic
+- **Inngest step-function rewrite** — turns the persist-and-resume into full tab-close-safe durability
+
+---
+
+## Prior state — 2026-09-26 (morning)
 
 **Phase 2 — XLSX source shipped.** Fifth Phase-2 epic ticked (all three checkboxes on the "XLSX source" block in `phases/phase-2.md`). Users can now upload `.xlsx` files alongside CSV / JSON; each sheet becomes an independent table that flows through the same mapping → dry run → execute pipeline unchanged.
 
