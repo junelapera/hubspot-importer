@@ -2,7 +2,15 @@
 
 Running log of where the HubDB Importer project is, what's in flight, and what's next. Update as we go.
 
-## Current state — 2026-09-27 (early morning)
+## Current state — 2026-09-27 (morning)
+
+**Basic Auth removed — Supabase Auth is the only gate.** Follow-up to the auth-system ship earlier this morning: the legacy Basic Auth fallback was pulled out entirely once the Supabase Auth flow was verified working end-to-end (register + login + logout + sidebar user chip). Rationale: coexistence adds branching in `proxy.ts`, two paths to keep working, and env-var mode-selection foot-guns. Since the app is Saltedstone-internal and there's only one active deployer (the user), a clean cut is safer than dragging the fallback forever. `proxy.ts` is now ~60 lines shorter and single-purpose; `BASIC_AUTH_USER` + `BASIC_AUTH_PASSWORD` env vars removed from `.env.example` + Vercel setup docs. Migration for anyone still on Basic Auth: register a first user via `/register` on their deployed URL, then delete the Basic Auth env vars in Vercel + redeploy.
+
+**Files touched:** `proxy.ts` (rip out `basicAuthGate`, `constantTimeEqual`, `unauthorized`, the mode-selection branch, ~60 lines gone), `.env.example` (Basic Auth block removed), `DEPLOYMENT.md` (env-var table + "Auth gate" section rewritten to single-mode Supabase Auth), `README.md` (status blurb cleaned), `CLAUDE.md` (proxy.ts note rewritten with a "Basic Auth was removed on 2026-09-27" one-liner for anyone tracing the history). 255 vitest cases / 19 suites still green
+
+---
+
+## Prior state — 2026-09-27 (early morning)
 
 **Per-user authentication shipped — Supabase Auth with @saltedstone.com email allowlist, immediate login, and Basic Auth kept as a legacy fallback.** First real user-account system on this app — previously the only gate was HTTP Basic Auth (shared credential, no user identity). This ships email+password self-registration + login + session cookies + logout with the domain check enforced both client + server side. Zero-disruption migration: existing deploys with `BASIC_AUTH_*` env vars keep working unchanged; delete those vars + redeploy + register a first user to migrate.
 

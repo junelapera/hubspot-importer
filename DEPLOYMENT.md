@@ -38,9 +38,8 @@ Save as `PORTAL_TOKEN_ENCRYPTION_KEY`.
    - `NEXT_PUBLIC_SUPABASE_URL` (same value as `SUPABASE_URL`)
    - `NEXT_PUBLIC_SUPABASE_ANON_KEY`
    - `PORTAL_TOKEN_ENCRYPTION_KEY`
-   - **Auth choice:** either set `BASIC_AUTH_USER` + `BASIC_AUTH_PASSWORD` for the legacy shared-credential gate, OR leave both unset to use Supabase Auth (email+password with @saltedstone.com domain allowlist). Can't mix — Basic Auth env vars win if set. Setting only one of the Basic Auth vars makes every request 401 (fail-closed foot-gun guard).
 4. Deploy.
-5. If you're using Supabase Auth, navigate to `/register` on your deployed URL to create the first user account. Everyone with an @saltedstone.com email can self-register from there.
+5. Navigate to `/register` on your deployed URL to create the first user account. Everyone with an @saltedstone.com email can self-register from there.
 
 `vercel.json` at the repo root already sets `maxDuration: 300` (5 minutes) on the execute route. Requires a Pro plan; Hobby caps at 10s for Node functions and imports will time out. See `docs/long-job-runner.md` for the plan to lift that ceiling.
 
@@ -63,26 +62,18 @@ Save as `PORTAL_TOKEN_ENCRYPTION_KEY`.
 | `NEXT_PUBLIC_SUPABASE_URL` | Same as `SUPABASE_URL` | Duplicated with `NEXT_PUBLIC_` prefix because Next.js only exposes env vars with that prefix to the browser bundle. |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Supabase → Settings → API | Public `anon` key. Safe to expose. Powers browser Supabase Auth (signIn/signUp/session cookies). |
 | `PORTAL_TOKEN_ENCRYPTION_KEY` | Generated once (see above) | 32 bytes base64. Rotating this loses every stored HubSpot token. Back it up. |
-| `BASIC_AUTH_USER` / `BASIC_AUTH_PASSWORD` | Chosen at deploy time | Legacy shared-credential gate via `proxy.ts`. If set, wins over Supabase Auth (kept for backward compat with pre-2026-09-26 deploys). Leave both unset to use Supabase Auth. Setting only one fails closed. |
 | `HUBSPOT_TOKEN` | `.env.local` only | Read by `scripts/spike/*.ts` for one-off checks. Not read by app code — production portals come from the `portals` table via `getPortalToken`. Don't set on Vercel. |
 | `HUBSPOT_PORTAL_ID` | `.env.local` only | Same — spike-scripts only. |
 
 ## Auth gate
 
-`proxy.ts` at the repo root runs on Vercel's Edge Runtime and gates the entire app. Two modes, auto-selected at request time:
+`proxy.ts` at the repo root runs on Vercel's Edge Runtime and gates the entire app behind Supabase Auth.
 
-**Supabase Auth (default, per-user)** — active when the Basic Auth env vars are BOTH unset.
-- Requires `NEXT_PUBLIC_SUPABASE_URL` + `NEXT_PUBLIC_SUPABASE_ANON_KEY`.
 - Users register at `/register` (only @saltedstone.com emails accepted); log in at `/login`. Session cookie is set by Supabase Auth automatically.
 - Unauthenticated requests to any protected route redirect to `/login?next=<original-url>`.
 - Public paths (`/login`, `/register`, `/api/auth/*`, static assets) always pass through.
-- If NEITHER Basic Auth env vars NOR Supabase Auth env vars are set → dev mode, auth skipped entirely (local development stays friction-free).
-
-**HTTP Basic Auth (legacy shared credential)** — active when both `BASIC_AUTH_USER` + `BASIC_AUTH_PASSWORD` are set.
-- Every browser visit prompts once for the shared credential; browser remembers it for the session. Every `curl` needs `-u user:pass` or an `Authorization: Basic <base64>` header.
-- Kept for existing Vercel Hobby deploys so migration to Supabase Auth is optional. Setting only one env var returns 401 on every request (fail-closed).
-- No user table — this is a shared credential, not per-user auth.
-- **To migrate to Supabase Auth**: delete the Basic Auth env vars from Vercel, redeploy, then visit `/register` to create your first user account.
+- Dev-mode fallback: if `NEXT_PUBLIC_SUPABASE_URL` + `NEXT_PUBLIC_SUPABASE_ANON_KEY` aren't set, auth is skipped entirely — local `pnpm dev` on a bare `.env.local` still works.
+- To rotate a user's access, delete them from **Authentication → Users** in the Supabase dashboard. Session cookies invalidate on the next request.
 
 ## Known deployment caveats
 
