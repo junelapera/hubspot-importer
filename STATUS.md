@@ -2,7 +2,81 @@
 
 Running log of where the HubDB Importer project is, what's in flight, and what's next. Update as we go.
 
-## Current state — 2026-09-27 (afternoon)
+## Current state — 2026-09-28
+
+**Inngest step-function runner shipped — `/api/portals/[id]/execute` is now enqueue-and-return.** The biggest architectural change since Phase 1 landed. The old synchronous executor blocked the request thread for the entire import + push-live sweep, hitting the Vercel `maxDuration: 300` ceiling on anything over ~3-4k rows and dying whenever the user closed the tab. The rewrite splits into: (a) fast API route that validates + persists + enqueues, (b) Inngest step function that runs `importRows` + `pushLive` out of band with automatic retries, (c) polling endpoint the client hits every 2s for progress + final response. Tab close, browser crash, deploy mid-run — the job outlives all of them.
+
+**Architecture:**
+
+```
+Browser → POST /api/portals/[id]/execute
+       ← 202 {jobId}                        (fast — validate + createJob(queued) + inngest.send)
+
+Browser → GET /api/jobs/[id] every 2s while status ∈ {queued, running}
+       ← {status, batchesDone, totals?, response?}
+
+Inngest Cloud → /api/inngest webhook → step-function:
+  step.run("preflight")             fetch schema, mark running
+  step.run("import-rows")           importRows with hooks writing job_batches + key_maps
+  step.run("publish:<table>")       pushLive per table in publish scope
+  step.run("finalize")              write totals + full response payload
+```
+
+**What shipped:**
+
+1. **`inngest@4.21.0` dep + `lib/inngest/client.ts`** — single app-wide `Inngest` client with `id: "hubspot-importer"`. `isDev: process.env.NODE_ENV !== "production"` set explicitly so the Inngest CLI dev server accepts unsigned events without needing `INNGEST_DEV=1` in `.env.local`
+2. **`lib/inngest/functions/execute-import.ts`** — the 4-step function. Reads all input (portal, sources, mappings, publish, dry-run signature) off the `jobs` row — Inngest steps run as independent HTTP invocations, so closure state doesn't cross the boundary; the DB row is the single source of truth. The import-rows step wires the same `ImportHooks` (`recordBatchStart` / `recordBatchComplete` / `upsertKeyMap`) plus a background 1s poller that watches `jobs.cancel_requested` and calls `AbortController.abort()` when set — cancel takes effect at the next batch boundary via `importRows`'s existing signal-check path. Errors classify into `ok / preflight / fail-fast / cancelled / hubspot / unknown` step outputs; the finalize step assembles the final `response` blob + row-errors + totals in one write
+3. **`app/api/inngest/route.ts`** — standard `inngest/next` `serve()` adapter registering `[executeImport]`. Runtime pinned to `nodejs` (serve needs Node crypto for HMAC verify)
+4. **`app/api/jobs/[id]/route.ts` (new — polling endpoint)** — returns `{status, totals, batchesDone, error, startedAt, finishedAt, cancelRequested, response}`. `response` field is populated only after terminal status; the client extracts `.result`, `.events`, `.published`, `.hubspot`, `.row`, `.fail` from it exactly like the old sync response
+5. **`app/api/jobs/[id]/cancel/route.ts` (new)** — POST flips `cancel_requested=true`. Idempotent; already-terminal jobs return 200 with `alreadyTerminal: true` so the client can suppress the button
+6. **Migration `20260928000000_inngest_runner.sql`** — additive: `input_sources`, `input_mappings`, `input_publish`, `dry_run_signature`, `response`, `cancel_requested`, `portal_id` columns on `jobs`, plus `queued` in the status CHECK. Backfills `portal_id` from mappings for legacy rows. No drops, no renames — historic jobs render unchanged
+7. **`lib/db/jobs.ts` extended** — `JobStatus` gains `"queued"`; `JobSummary` gains all the new columns. New helpers: `markJobRunning`, `requeueJob` (resume path — resets a failed job back to queued and clears totals/response before re-enqueue), `setJobResponse`, `requestCancel`, `isCancelRequested`. `createJob` extended to accept the input columns + status; defaults preserve the old "running" behavior for dry-runs
+8. **`lib/db/job-batches.ts` extended** — new `countCompletedBatches` (cheap count query using `{count: "exact", head: true}`) for the polling endpoint's progress counter
+9. **`app/api/portals/[id]/execute/route.ts` rewritten** — keeps all up-front validation (body parse, dry-run signature verify, `synthesizeExecution` — bad input still 400s synchronously). Then either `createJob(status="queued", +inputs)` + `inngest.send`, or on resume path `requeueJob` + `inngest.send` against the existing jobId. Returns `NextResponse.json({jobId, status: "queued"}, {status: 202})`. Never blocks on the actual import
+10. **`app/import/execute-panel.tsx` rewritten** — new `polling` stage with `setInterval` at 2s. Live counter shows "N batches completed" + per-table so-far totals (from `totals.tables` on the poll response). Cancel button POSTs to `/api/jobs/{jobId}/cancel` instead of aborting a fetch (there's no long fetch anymore — the enqueue POST returned in ms). Terminal state renders via the SAME `done` / `fail-fast` / `cancelled` / `error` stages the old UI used — the `ResultView` didn't change, just how we get to it. `useEffect` cleanup clears the interval on unmount so a nav-away doesn't keep hitting the poll endpoint
+11. **`proxy.ts` — `/api/inngest` added to `PUBLIC_PREFIXES`** — Inngest Cloud (and the CLI dev server) posts HMAC-signed webhooks to `/api/inngest`; the Supabase auth gate would 307 those to `/login` and break every step invocation. HMAC verification is handled inside `serve()` itself
+12. **`pnpm dev:inngest` script** — wraps `npx inngest-cli@latest dev -u http://localhost:3000/api/inngest`. Second terminal alongside `pnpm dev`. Inngest dashboard at http://localhost:8288
+13. **`.env.example` + `DEPLOYMENT.md`** — new `INNGEST_EVENT_KEY` + `INNGEST_SIGNING_KEY` documented (blank in dev; Inngest Cloud provides both for prod). DEPLOYMENT gets an "Inngest Cloud setup" block covering the 4-step provisioning flow
+14. **`app/jobs/page.tsx` StatusBadge** — added `queued` styling (yellow chip)
+
+**Files touched:** `lib/inngest/client.ts` (new), `lib/inngest/functions/execute-import.ts` (new), `app/api/inngest/route.ts` (new), `app/api/jobs/[id]/route.ts` (new), `app/api/jobs/[id]/cancel/route.ts` (new), `supabase/migrations/20260928000000_inngest_runner.sql` (new), `lib/db/jobs.ts` (+~130 lines new helpers + types), `lib/db/job-batches.ts` (+countCompletedBatches), `app/api/portals/[id]/execute/route.ts` (full rewrite — 351 → 200 lines), `app/import/execute-panel.tsx` (full rewrite — polling stage), `app/jobs/page.tsx` (StatusBadge), `proxy.ts` (public prefixes), `package.json` (+inngest dep, +dev:inngest script), `.env.example`, `DEPLOYMENT.md`. 255 vitest cases still green, tsc + lint clean
+
+**Design decisions worth remembering:**
+- **Whole `importRows` in one step, not per-batch step splitting.** Chose the simpler path — a mid-run crash retries the whole step, which is safe because upserts are idempotent by natural key. Trade-off: each step attempt still has the 300s Vercel cap, so a 5k-row import in a single step attempt could time out; but on timeout Inngest retries the step automatically, no user action needed. Per-batch step splitting is the follow-up if someone actually hits the ceiling repeatedly — it needs `importRows` to be pausable + step-driven, which is meaningful surgery
+- **Sources persisted on `jobs.input_sources`, not a new `job_inputs` table.** Simplest — JSONB is how everything on this row already works. Postgres TOAST cap is ~1 GB, and a 10k-row wide-column source is well under. Keeps the Inngest handler to one row read
+- **Mappings snapshot on the job row too** (`input_mappings`), separate from the profile's `state_json`. Users can edit mappings between enqueue and processing; we freeze what was actually run so a re-enqueue reproduces exactly
+- **Cancellation via DB flag + interval poll**, not via Inngest's own cancel API. Wanted the existing `ImportOptions.signal` contract to keep working unchanged — the poller wraps it. The cancel *request* is instant (row update), the actual cancel takes effect at the next batch boundary. Feedback to the user is the "cancel requested · Cancelling…" chip
+- **Client polling every 2s, not SSE.** Simpler; works on every browser; no server-push machinery. `useEffect` cleanup handles the interval. Tab close → poll stops but the run continues on the server; reopen `/jobs/[id]` → status still there. Sub-second progress latency isn't worth SSE's complexity for a batch import
+- **The `response` blob is the client's terminal payload** — same `{result, events, published, hubspot?, row?, fail?}` shape the old sync response returned. `ExecutePanel` reads it off the poll body via `.response.result` etc., dispatches into the existing stages. Zero rewrite of `ResultView` / `TableCard` / etc. — the visual output is identical, just delivered async
+- **`isDev: process.env.NODE_ENV !== "production"` in the Inngest client**, not `INNGEST_DEV=1`. One less env var for the developer to remember. Prod detection is standard; dev mode short-circuits HMAC verification so the CLI dev server can talk to `/api/inngest` unauthenticated
+- **`/api/inngest` in `PUBLIC_PREFIXES`, not a Supabase-session-bypass in the route itself.** Simpler + more visible: anyone scanning `proxy.ts` sees the webhook is public. HMAC signing is the actual auth for that endpoint (managed by `inngest/next`'s `serve` in production)
+- **`requeueJob` on resume, not a new job row.** Preserves the audit trail — the same jobId shows one "attempts" story across the retry(ies). Clears `totals` + `response` + `cancel_requested` on requeue so the polling endpoint doesn't briefly serve stale terminal data mid-re-run
+- **Backfill `portal_id` on migration** — the old join was `jobs → mappings → portal_id`. Denormalizing onto `jobs.portal_id` avoids a join on the polling hot path and gives the Inngest handler a portal reference even when the mapping's been deleted. Migration backfills legacy rows in one UPDATE; `JobWithMapping.toJobWithMapping` prefers the new column with the joined-mapping value as a fallback
+
+**Manual step required to activate:** apply `supabase/migrations/20260928000000_inngest_runner.sql` in the Supabase SQL Editor (Read-only OFF). Until it's applied, executing an import will 500 on the `createJob` call because the new columns don't exist yet.
+
+**Follow-ups explicitly deferred:**
+- Per-batch step splitting (still whole-importRows-in-one-step; revisit if the 300s ceiling actually bites)
+- SSE stream (polling is the shipped choice — trade cache warmth for reduced complexity)
+- Detect-interrupted-jobs-on-runner-restart (Inngest solves this by construction now — a step that never completes gets retried on the next Inngest cycle)
+- Rate-limit throttling via `step.sleep()` — the existing per-request retry already honors `Retry-After`
+
+**Still open on `phases/phase-2.md`:**
+- OAuth flow for private Google Sheets (deferred)
+- Refresh-from-sheet action for saved mappings
+- Full cycle handling — two-phase write for cyclic FK graphs, self-reference end-to-end
+- F11 tail — re-run saved mapping against a different portal
+- Google OAuth via Supabase Auth
+- (Provision-writes-back-tableId — Phase-1 F3 polish carried over)
+
+**Next up (unblocked):**
+- **End-to-end verification** against a real portal after the migration is applied
+- **Google OAuth** via Supabase Auth — trivial dashboard toggle + one button on `/login`
+- **Refresh-from-sheet** — now unblocked by the Inngest runner (the refresh action can enqueue a new import against the saved profile's source URLs)
+
+---
+
+## Prior state — 2026-09-27 (afternoon)
 
 **Form-control visibility pass + checkbox check-icon fix.** Two small but bite-y issues surfaced by the day's smoke testing. Both fixed in one pass.
 

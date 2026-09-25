@@ -1,5 +1,8 @@
 # Long-job runner strategy
 
+> **Status: shipped 2026-09-28.** Recommendation below (Option A — Inngest) is in production. `lib/inngest/*` implements the step function; `POST /api/portals/[id]/execute` is now enqueue-and-return; the client polls `GET /api/jobs/[id]` every 2s. See the STATUS.md entry for 2026-09-28 for the full change log. This doc kept for historical context — the "What already works" and "Design options" sections describe the state at Phase-1 close.
+
+
 ## The constraint
 
 `POST /api/portals/[id]/execute` runs `importRows` synchronously in the request handler. Vercel serverless function timeouts:
@@ -75,18 +78,19 @@ Rent a $5 VM or use Fly.io Machines, run a Node process that polls `jobs` and pr
 
 ## Recommendation
 
-**Ship MVP with the current synchronous handler + `maxDuration: 300`.** Document the ~4-6-minute ceiling for users. In practice, MVP-sized imports (hundreds to low thousands of rows) fit well inside 300s.
+**~~Ship MVP with the current synchronous handler + `maxDuration: 300`.~~** [Shipped Phase 1.]
 
-**Phase 2 rework: adopt Inngest (Option A).** Cheapest path to a resumable, tab-close-safe runner without inventing our own state machine. The existing `jobs` / `job_batches` / `key_maps` schema fits Inngest's step-function model directly:
+**Phase 2 rework: adopt Inngest (Option A).** [**Shipped 2026-09-28.**] Cheapest path to a resumable, tab-close-safe runner without inventing our own state machine. The existing `jobs` / `job_batches` / `key_maps` schema fits Inngest's step-function model directly. As shipped:
 
 ```
-inngest.step("preflight",  ...) → writes jobs row
-inngest.step("upsert-brands", ...) → writes job_batches rows + key_maps
-inngest.step("upsert-products", ...) → reads key_maps → writes job_batches
-inngest.step("publish", ...) → pushLive per table
+step.run("preflight", ...)       → load jobs row, resolve portal, markJobRunning
+step.run("import-rows", ...)     → whole importRows in one step; hooks write job_batches + key_maps;
+                                   1s poller on jobs.cancel_requested aborts via AbortController
+step.run("publish:<table>", ...) → one step per table in publish scope (retries per-table)
+step.run("finalize", ...)        → setJobResponse + insertJobErrors + completeJob
 ```
 
-Each step commits its cursor, so a step-level retry is idempotent against the `job_batches` unique index `(job_id, table_name, batch_index)`.
+The shipped design chose **whole-`importRows` in one step**, not per-batch step splitting. Trade-off: each attempt still has the 300s Vercel cap, but Inngest retries the step automatically on timeout/crash — and upserts are idempotent by natural key, so a retry safely re-runs. Per-batch step splitting (`step.run("upsert:<table>:<batch>", ...)`) is the follow-up if a real workload hits the ceiling repeatedly. It needs `importRows` refactored to a pausable/step-driven form; meaningful surgery for a small marginal win at MVP scale.
 
 ## Non-goals
 

@@ -17,7 +17,11 @@ import { createServerClient, type CookieOptions } from "@supabase/ssr";
 // Public paths: auth routes + Next's built-in icon conventions (favicon.ico,
 // icon.png, apple-icon.png, etc.) so the browser tab icon renders on the
 // login screen instead of getting redirected to itself.
-const PUBLIC_PREFIXES = ["/login", "/register", "/api/auth/", "/favicon", "/icon", "/apple-icon"];
+// /api/inngest is called by Inngest Cloud (and the Inngest CLI dev
+// server) with HMAC-signed webhooks — signing key verification is
+// handled inside the serve() adapter, not by our auth gate. Redirecting
+// those requests to /login would break every step invocation.
+const PUBLIC_PREFIXES = ["/login", "/register", "/api/auth/", "/api/inngest", "/favicon", "/icon", "/apple-icon"];
 
 function isPublicPath(pathname: string): boolean {
   return PUBLIC_PREFIXES.some((p) => pathname.startsWith(p));

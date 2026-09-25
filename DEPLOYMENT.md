@@ -38,10 +38,18 @@ Save as `PORTAL_TOKEN_ENCRYPTION_KEY`.
    - `NEXT_PUBLIC_SUPABASE_URL` (same value as `SUPABASE_URL`)
    - `NEXT_PUBLIC_SUPABASE_ANON_KEY`
    - `PORTAL_TOKEN_ENCRYPTION_KEY`
+   - `INNGEST_EVENT_KEY` (Inngest Cloud → App settings)
+   - `INNGEST_SIGNING_KEY` (Inngest Cloud → App settings)
 4. Deploy.
 5. Navigate to `/register` on your deployed URL to create the first user account. Everyone with an @saltedstone.com email can self-register from there.
 
-`vercel.json` at the repo root already sets `maxDuration: 300` (5 minutes) on the execute route. Requires a Pro plan; Hobby caps at 10s for Node functions and imports will time out. See `docs/long-job-runner.md` for the plan to lift that ceiling.
+`vercel.json` at the repo root already sets `maxDuration: 300` (5 minutes) on the execute route. Since the runner rework (2026-09-28) the execute route only enqueues an Inngest event — the actual work lives on the `/api/inngest` webhook, which also caps at 300s per step. Anything that takes longer per step retries automatically. Requires a Pro plan for the 300s ceiling; Hobby caps at 10s and non-trivial imports won't fit in a single Inngest step.
+
+**Inngest Cloud setup** (production):
+1. Create an app at https://app.inngest.com.
+2. In the app settings, copy the **Event Key** and **Signing Key** into `INNGEST_EVENT_KEY` + `INNGEST_SIGNING_KEY` on Vercel.
+3. Point the app at your deployed `/api/inngest` URL — Inngest Cloud auto-discovers the registered functions on first webhook fire.
+4. First execute triggers the discovery; subsequent runs stream in the Inngest dashboard.
 
 ## Every-deploy checklist
 
@@ -64,6 +72,8 @@ Save as `PORTAL_TOKEN_ENCRYPTION_KEY`.
 | `PORTAL_TOKEN_ENCRYPTION_KEY` | Generated once (see above) | 32 bytes base64. Rotating this loses every stored HubSpot token. Back it up. |
 | `HUBSPOT_TOKEN` | `.env.local` only | Read by `scripts/spike/*.ts` for one-off checks. Not read by app code — production portals come from the `portals` table via `getPortalToken`. Don't set on Vercel. |
 | `HUBSPOT_PORTAL_ID` | `.env.local` only | Same — spike-scripts only. |
+| `INNGEST_EVENT_KEY` | Inngest Cloud → App settings | Signs events sent from the Vercel Node runtime to Inngest. Missing in dev is fine — the Inngest CLI dev server accepts unsigned events. |
+| `INNGEST_SIGNING_KEY` | Inngest Cloud → App settings | Verifies HMAC on webhooks from Inngest Cloud back into `/api/inngest`. Same dev caveat. |
 
 ## Auth gate
 

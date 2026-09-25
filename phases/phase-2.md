@@ -10,8 +10,18 @@
 - [ ] Re-run saved mapping against a new file
 - [ ] Re-run saved mapping against a different portal (lookup by name)
 
+## Async runner (Inngest)
+- [x] `POST /api/portals/[id]/execute` enqueue-and-return (validates + `createJob(status="queued")` + `inngest.send`; returns 202 `{jobId}` in ms — see `lib/inngest/functions/execute-import.ts` for the step function)
+- [x] Inngest step function: `preflight → import-rows → publish:<table> → finalize` (all read state fresh from the `jobs` row; closure state does NOT cross step boundaries — steps are independent HTTP invocations)
+- [x] Client polling every 2s via `GET /api/jobs/[id]` — polling endpoint returns `{status, batchesDone, totals?, response?}`; `ExecutePanel` reads `.response` on terminal status and dispatches into the existing `done` / `fail-fast` / `cancelled` / `error` stages (zero rewrite of `ResultView`)
+- [x] Cancel via DB flag (`POST /api/jobs/[id]/cancel` flips `cancel_requested`; import-rows step polls it every 1s and aborts via existing `AbortController` contract; effect at next batch boundary)
+- [x] Migration `20260928000000_inngest_runner.sql` adds `input_sources` / `input_mappings` / `input_publish` / `dry_run_signature` / `response` / `cancel_requested` / `portal_id` on `jobs` + `queued` status
+- [x] `pnpm dev:inngest` script + `INNGEST_EVENT_KEY` / `INNGEST_SIGNING_KEY` env vars (blank in dev — `isDev: process.env.NODE_ENV !== "production"` short-circuits HMAC verification for the CLI dev server)
+- [x] `/api/inngest` in `proxy.ts` `PUBLIC_PREFIXES` so Inngest webhook calls skip the Supabase auth gate (HMAC verification handled by `serve` in prod)
+- [ ] Per-batch step splitting (defer — whole-`importRows` in one step is safe because upserts are idempotent, and Inngest retries on timeout. Revisit if the 300s per-step cap actually bites repeatedly)
+- [ ] Detect interrupted jobs on runner restart — Inngest solves this by construction now (steps that never complete get retried); leave as-is unless we see stuck-queued jobs in practice
+
 ## Resume from failure
-- [ ] Detect interrupted jobs on runner restart (Phase 3 — belongs with the Inngest step-function rewrite; the persist-and-resume slice below doesn't require a runner daemon)
 - [x] Resume from last completed batch cursor (`lib/hubdb/import.ts` gains `ImportHooks` — `onBatchStart` / `onBatchComplete` write per-batch rows to `job_batches` via `lib/db/job-batches.ts`. Resume is upsert-idempotent by natural key so re-running just re-classifies prior successes as no-op updates; the audit trail in `job_batches` makes it inspectable)
 - [x] UI: "resume" action on failed jobs in history (Resume button on `/jobs/[id]` for failed / cancelled jobs; deep-links to `/import?resume=<jobId>&portalId=<...>&mappingId=<...>`; wizard auto-selects the portal + auto-loads the mapping profile + shows a banner; `resumeJobId` threads through `ExecutePanel` → `POST /api/portals/[id]/execute` which reuses the existing job row instead of creating a new one)
 - [x] Preserve key map across resume (`onKeyMapReady` hook writes each table's natural-key → row-id map to `key_maps` via `lib/db/key-maps.ts` when pass-1 finishes. `loadKeyMaps` reads them back for future Inngest wiring; the current sync executor rebuilds via `listAllDraftRows` since the resume runs in one request)

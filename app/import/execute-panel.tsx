@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
   Select,
@@ -17,6 +17,35 @@ type PublishMode = "none" | "foreign-only" | "all";
 
 type PublishedEntry = { table: string; publishedAt?: string; error?: string };
 
+// The shape the polling endpoint returns.
+type JobPollResponse = {
+  id: string;
+  status: "queued" | "pending" | "running" | "succeeded" | "failed" | "cancelled";
+  totals: {
+    tables: { name: string; created: number; updated: number; skipped: number; errors: number }[];
+    order: string[];
+    ok: boolean;
+    publish?: PublishMode;
+    publishedTables?: string[];
+  } | null;
+  error: string | null;
+  startedAt: string | null;
+  finishedAt: string | null;
+  cancelRequested: boolean;
+  batchesDone: number;
+  response: {
+    result?: ImportResult;
+    events?: ImportEvent[];
+    published?: PublishedEntry[];
+    hubspot?: { status: number; path: string; method: string; body?: unknown };
+    row?: RowError;
+    fail?: { kind: "fail-fast" | "cancelled"; message: string };
+  } | null;
+};
+
+// What the client ends up rendering. Assembled from JobPollResponse
+// once the run flips terminal; the running-state renderer only needs
+// {status, batchesDone, totals}.
 type ExecuteResponse = {
   result?: ImportResult;
   events?: ImportEvent[];
@@ -32,11 +61,21 @@ type ExecuteResponse = {
 
 type Stage =
   | { kind: "idle" }
-  | { kind: "running" }
+  | {
+      kind: "polling";
+      jobId: string;
+      startedAt: string;
+      batchesDone: number;
+      status: JobPollResponse["status"];
+      totals: JobPollResponse["totals"];
+      cancelling: boolean;
+    }
   | { kind: "error"; message: string; issues?: unknown[]; hubspot?: ExecuteResponse["hubspot"] }
   | { kind: "fail-fast"; response: ExecuteResponse; startedAt: string; finishedAt: string; message: string }
   | { kind: "cancelled"; response: ExecuteResponse; startedAt: string; finishedAt: string; message: string }
   | { kind: "done"; response: ExecuteResponse; startedAt: string; finishedAt: string };
+
+const POLL_INTERVAL_MS = 2000;
 
 export function ExecutePanel({
   portalId,
@@ -59,13 +98,132 @@ export function ExecutePanel({
 }) {
   const [publish, setPublish] = useState<PublishMode>("foreign-only");
   const [stage, setStage] = useState<Stage>({ kind: "idle" });
-  const abortRef = useRef<AbortController | null>(null);
+  const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const jobIdRef = useRef<string | null>(null);
+  const autoSavedRef = useRef<boolean>(false);
+
+  // Clean up the poll timer on unmount so an unmounted panel doesn't
+  // keep hitting the API forever.
+  useEffect(() => {
+    return () => {
+      if (pollTimerRef.current) clearInterval(pollTimerRef.current);
+    };
+  }, []);
+
+  function stopPolling() {
+    if (pollTimerRef.current) {
+      clearInterval(pollTimerRef.current);
+      pollTimerRef.current = null;
+    }
+  }
+
+  async function pollOnce(jobId: string, startedAt: string) {
+    let body: JobPollResponse;
+    try {
+      const res = await fetch(`/api/jobs/${jobId}`);
+      if (!res.ok) {
+        // 404 → the job disappeared (mapping cascade-delete). Terminal
+        // error. Otherwise let the next tick try again.
+        if (res.status === 404) {
+          stopPolling();
+          setStage({ kind: "error", message: `job ${jobId} not found` });
+        }
+        return;
+      }
+      body = (await res.json()) as JobPollResponse;
+    } catch {
+      // Network blip — let the next tick retry.
+      return;
+    }
+
+    // Still in flight — update the live counter + status.
+    if (body.status === "queued" || body.status === "pending" || body.status === "running") {
+      setStage((prev) =>
+        prev.kind === "polling"
+          ? {
+              ...prev,
+              batchesDone: body.batchesDone,
+              status: body.status,
+              totals: body.totals,
+              cancelling: body.cancelRequested,
+            }
+          : prev,
+      );
+      return;
+    }
+
+    // Terminal — stop polling and dispatch into the render stage.
+    stopPolling();
+    const finishedAt = body.finishedAt ?? new Date().toISOString();
+    const response: ExecuteResponse = {
+      result: body.response?.result,
+      events: body.response?.events,
+      published: body.response?.published,
+      jobId,
+      persistenceError: null,
+      autoSavedProfile: autoSavedRef.current,
+      row: body.response?.row,
+      hubspot: body.response?.hubspot,
+      error: body.error ?? body.response?.fail?.message ?? undefined,
+    };
+
+    if (body.status === "cancelled") {
+      setStage({
+        kind: "cancelled",
+        response,
+        startedAt,
+        finishedAt,
+        message: response.error ?? "cancelled",
+      });
+      return;
+    }
+
+    if (body.status === "failed") {
+      // Fail-fast has a per-row `row` on the response payload. Anything
+      // else with a result is a "run finished with errors" state that
+      // we render as `done` (the ResultView already highlights errors).
+      // Hubspot 4xx from a preflight/hubspot error path shows as
+      // top-level `error` stage.
+      if (body.response?.fail?.kind === "fail-fast" && response.result && response.row) {
+        setStage({
+          kind: "fail-fast",
+          response,
+          startedAt,
+          finishedAt,
+          message: response.error ?? "fail-fast",
+        });
+        return;
+      }
+      if (response.result) {
+        // Runs that finished but had per-row errors — render the full
+        // result cards so users can see which rows failed.
+        setStage({ kind: "done", response, startedAt, finishedAt });
+        return;
+      }
+      setStage({
+        kind: "error",
+        message: response.error ?? "failed",
+        hubspot: response.hubspot,
+      });
+      return;
+    }
+
+    // Succeeded.
+    setStage({ kind: "done", response, startedAt, finishedAt });
+  }
 
   async function run() {
     const startedAt = new Date().toISOString();
-    const controller = new AbortController();
-    abortRef.current = controller;
-    setStage({ kind: "running" });
+    stopPolling();
+    setStage({
+      kind: "polling",
+      jobId: "",
+      startedAt,
+      batchesDone: 0,
+      status: "queued",
+      totals: null,
+      cancelling: false,
+    });
     try {
       const res = await fetch(`/api/portals/${portalId}/execute`, {
         method: "POST",
@@ -78,65 +236,58 @@ export function ExecutePanel({
           resumeJobId: resumeJobId ?? undefined,
           dryRunSignature,
         }),
-        signal: controller.signal,
       });
-      const body = (await res.json()) as ExecuteResponse;
-      const finishedAt = new Date().toISOString();
-      if (!res.ok) {
-        // fail-fast: server returned 422 with a full result + failing row
-        if (res.status === 422 && body.result && body.row) {
-          setStage({
-            kind: "fail-fast",
-            response: body,
-            startedAt,
-            finishedAt,
-            message: body.error ?? "fail-fast",
-          });
-          return;
-        }
-        // 499: server observed the cancel signal and returned a partial result
-        if (res.status === 499 && body.result) {
-          setStage({
-            kind: "cancelled",
-            response: body,
-            startedAt,
-            finishedAt,
-            message: body.error ?? "cancelled",
-          });
-          return;
-        }
+      const body = (await res.json()) as {
+        jobId?: string;
+        status?: string;
+        error?: string;
+        issues?: unknown[];
+        autoSavedProfile?: boolean;
+      };
+      if (!res.ok || !body.jobId) {
         setStage({
           kind: "error",
           message: body.error ?? `HTTP ${res.status}`,
           issues: body.issues,
-          hubspot: body.hubspot,
         });
         return;
       }
-      setStage({ kind: "done", response: body, startedAt, finishedAt });
+      jobIdRef.current = body.jobId;
+      autoSavedRef.current = body.autoSavedProfile ?? false;
+      setStage({
+        kind: "polling",
+        jobId: body.jobId,
+        startedAt,
+        batchesDone: 0,
+        status: "queued",
+        totals: null,
+        cancelling: false,
+      });
+      // First tick immediately so the UI updates fast if the run
+      // completed in-between the enqueue and now (small imports finish
+      // in seconds).
+      void pollOnce(body.jobId, startedAt);
+      pollTimerRef.current = setInterval(
+        () => void pollOnce(body.jobId!, startedAt),
+        POLL_INTERVAL_MS,
+      );
     } catch (err) {
-      // AbortError fires here when the user cancelled — the server may still
-      // finish the current batch and record the cancel in the job row, but
-      // the client has no way to see that response. Show a lightweight
-      // cancelled state so the UI reflects the user's action.
-      if ((err as Error).name === "AbortError") {
-        setStage({
-          kind: "cancelled",
-          response: {},
-          startedAt,
-          finishedAt: new Date().toISOString(),
-          message: "Cancelled — the server may still complete the current batch",
-        });
-        return;
-      }
+      stopPolling();
       setStage({ kind: "error", message: (err as Error).message });
-    } finally {
-      abortRef.current = null;
     }
   }
 
-  function cancel() {
-    abortRef.current?.abort();
+  async function cancel() {
+    if (stage.kind !== "polling" || !stage.jobId) return;
+    // Optimistic — flip the local flag so the button feedback is
+    // immediate. The real cancel takes effect at the next batch
+    // boundary on the server.
+    setStage((prev) => (prev.kind === "polling" ? { ...prev, cancelling: true } : prev));
+    try {
+      await fetch(`/api/jobs/${stage.jobId}/cancel`, { method: "POST" });
+    } catch {
+      // Best-effort — the next poll will show whether the flag flipped.
+    }
   }
 
   return (
@@ -145,8 +296,8 @@ export function ExecutePanel({
         <div>
           <h2 className="text-sm font-semibold">Execute</h2>
           <p className="text-xs text-muted-foreground">
-            Writes to draft tables via <code className="rounded bg-muted px-1">importRows</code>. Batches at 100/call, upserts by natural key.
-            Publish step runs in dependency order.
+            Enqueues an Inngest job that runs <code className="rounded bg-muted px-1">importRows</code>. Batches at 100/call, upserts by natural key.
+            Publish step runs in dependency order. Safe to close this tab — the run continues on the server.
           </p>
         </div>
         <div className="flex items-center gap-3">
@@ -155,7 +306,7 @@ export function ExecutePanel({
             <Select
               value={publish}
               onValueChange={(v) => setPublish(v as PublishMode)}
-              disabled={stage.kind === "running"}
+              disabled={stage.kind === "polling"}
               items={[
                 { value: "none", label: "none (draft only)" },
                 { value: "foreign-only", label: "foreign tables only" },
@@ -172,17 +323,23 @@ export function ExecutePanel({
               </SelectContent>
             </Select>
           </label>
-          {stage.kind === "running" ? (
-            <Button variant="destructive" onClick={cancel}>
-              Cancel
+          {stage.kind === "polling" && stage.jobId ? (
+            <Button
+              variant="destructive"
+              onClick={cancel}
+              disabled={stage.cancelling}
+            >
+              {stage.cancelling ? "Cancelling…" : "Cancel"}
             </Button>
           ) : null}
           <Button
             onClick={run}
-            disabled={disabled || !dryRunSignature || stage.kind === "running"}
+            disabled={disabled || !dryRunSignature || stage.kind === "polling"}
           >
-            {stage.kind === "running"
-              ? "Executing…"
+            {stage.kind === "polling"
+              ? stage.status === "queued"
+                ? "Queued…"
+                : "Running…"
               : stage.kind === "done" || stage.kind === "fail-fast" || stage.kind === "cancelled"
                 ? "Re-run"
                 : "Execute"}
@@ -196,6 +353,36 @@ export function ExecutePanel({
         </p>
       ) : disabled && disabledReason ? (
         <p className="text-xs text-muted-foreground">{disabledReason}</p>
+      ) : null}
+
+      {stage.kind === "polling" && stage.jobId ? (
+        <div className="rounded-md border border-border bg-muted/20 p-3 text-xs space-y-1">
+          <p>
+            <span className="font-medium">Job</span>{" "}
+            <a href={`/jobs/${stage.jobId}`} className="underline">
+              <code className="rounded bg-muted px-1">{stage.jobId}</code>
+            </a>
+            {" · "}
+            <span className="capitalize">{stage.status}</span>
+            {stage.cancelling ? " · cancel requested" : null}
+          </p>
+          <p className="text-muted-foreground">
+            {stage.batchesDone} batch{stage.batchesDone === 1 ? "" : "es"} completed
+            {stage.totals?.tables && stage.totals.tables.length > 0 ? (
+              <>
+                {" · tables so far: "}
+                {stage.totals.tables.map((t) => (
+                  <span key={t.name} className="mr-1">
+                    <code className="rounded bg-muted px-1 text-foreground">{t.name}</code>
+                    <span className="text-emerald-700 dark:text-emerald-300"> +{t.created}</span>
+                    {t.updated > 0 ? <span className="text-blue-700 dark:text-blue-300"> ~{t.updated}</span> : null}
+                    {t.errors > 0 ? <span className="text-destructive"> !{t.errors}</span> : null}
+                  </span>
+                ))}
+              </>
+            ) : null}
+          </p>
+        </div>
       ) : null}
 
       {stage.kind === "error" ? (

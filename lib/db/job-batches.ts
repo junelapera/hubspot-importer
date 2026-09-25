@@ -57,6 +57,22 @@ export async function recordBatchComplete(
 
 export type CompletedBatchIndex = Record<string, Set<number>>;
 
+// Cheap count query for the polling endpoint's progress counter. Same
+// shape as listCompletedBatches but returns just the total across all
+// tables — the UI shows a running "N batches completed" ticker.
+export async function countCompletedBatches(
+  client: SupabaseClient,
+  jobId: string,
+): Promise<number> {
+  const { count, error } = await client
+    .from("job_batches")
+    .select("*", { count: "exact", head: true })
+    .eq("job_id", jobId)
+    .eq("status", "succeeded");
+  if (error) throw new Error(`job_batches.count failed: ${error.message}`);
+  return count ?? 0;
+}
+
 // Returns { tableName → Set<batchIndex> } of batches that reached
 // `succeeded`. Resume skips these on the next attempt.
 export async function listCompletedBatches(

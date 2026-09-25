@@ -2,38 +2,29 @@ import { NextResponse, type NextRequest } from "next/server";
 import { z } from "zod";
 import { getPortalById, getPortalToken } from "@/lib/db/portals";
 import { createSupabaseServerClient } from "@/lib/db/supabase";
-import {
-  createHubdbClient,
-  fetchPortalSchema,
-  HubdbError,
-  importRows,
-  opsFromClientForImport,
-  pushLive,
-  ImportCancelledError,
-  ImportFailFastError,
-  ImportPreflightError,
-  type ImportEvent,
-  type ImportResult,
-} from "@/lib/hubdb";
+import { createHubdbClient, fetchPortalSchema } from "@/lib/hubdb";
 import { computeExecutionSignature, synthesizeExecution } from "@/lib/execution";
 import type { MappingState } from "@/lib/mapping";
 import { createMapping, getMappingById } from "@/lib/db/mappings";
 import {
-  completeJob,
   createJob,
   getJobById,
-  insertJobErrors,
-  type JobTableTotals,
-  type JobTotals,
+  requeueJob,
+  type PublishMode,
 } from "@/lib/db/jobs";
-import {
-  recordBatchComplete,
-  recordBatchStart,
-} from "@/lib/db/job-batches";
-import { upsertKeyMap } from "@/lib/db/key-maps";
+import { inngest } from "@/lib/inngest/client";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 export const runtime = "nodejs";
+
+// The route now enqueues an Inngest event and returns 202 immediately.
+// The Inngest handler (lib/inngest/functions/execute-import.ts) runs
+// the actual import out-of-band; the client polls GET /api/jobs/[id]
+// for status + final response.
+//
+// All up-front validation (dry-run signature, portal reachability,
+// synthesis) still runs on the request thread so bad input gets a
+// synchronous 4xx instead of a "queued" row that will fail later.
 
 const SourceZ = z.object({
   name: z.string().min(1),
@@ -54,8 +45,6 @@ const Body = z.object({
   // never previewed.
   dryRunSignature: z.string().min(1),
 });
-
-type PublishMode = "none" | "foreign-only" | "all";
 
 function errorResponse(status: number, message: string, extra?: Record<string, unknown>) {
   return NextResponse.json({ error: message, ...extra }, { status });
@@ -86,27 +75,10 @@ async function resolveMappingId(
   }
 }
 
-function summarize(
-  result: ImportResult,
-  publish: PublishMode,
-  publishedTables: string[],
-  durationMs: number,
-): JobTotals {
-  const tables: JobTableTotals[] = result.tables.map((t) => ({
-    name: t.name,
-    created: t.created,
-    updated: t.updated,
-    skipped: t.skipped,
-    errors: t.errors.length,
-  }));
-  return { order: result.order, tables, ok: result.ok, publish, publishedTables, durationMs };
-}
-
 export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const startedAt = Date.now();
   const { id } = await params;
   let raw: unknown;
   try {
@@ -148,6 +120,10 @@ export async function POST(
     );
   }
 
+  // Synthesize now so mapping-shape errors surface as a synchronous
+  // 400 (not a queued job that fails later). The Inngest handler
+  // re-synthesizes at run-time against a fresh portal snapshot in case
+  // the schema shifted between enqueue and processing.
   const synth = synthesizeExecution({
     sources: body.data.sources,
     mappings,
@@ -159,193 +135,90 @@ export async function POST(
     });
   }
 
-  // Best-effort job persistence. If the F11 migration isn't applied yet, or
-  // the DB is transiently unreachable, we still run the import and return
-  // the result; the response echoes any persistence error so the UI can
-  // surface it.
-  let jobId: string | null = null;
-  let persistenceError: string | null = null;
-  let resolved: { mappingId: string; autoSaved: boolean } | null = null;
+  const publish = body.data.publish as PublishMode;
+
+  // Resume path — reuse the existing job row instead of creating one.
   if (body.data.resumeJobId) {
-    // Resume path: reuse the existing job row + its mapping. Skip
-    // createMapping / createJob entirely so /jobs history stays coherent.
+    let existing;
     try {
-      const existing = await getJobById(supabase, body.data.resumeJobId);
-      if (!existing) {
-        return errorResponse(404, `job ${body.data.resumeJobId} not found`);
-      }
-      jobId = existing.id;
+      existing = await getJobById(supabase, body.data.resumeJobId);
     } catch (err) {
-      persistenceError = `resume lookup failed: ${(err as Error).message}`;
+      return errorResponse(500, `resume lookup failed: ${(err as Error).message}`);
     }
-  } else {
-    resolved = await resolveMappingId(supabase, id, body.data.profileId, mappings);
-    if (resolved) {
-      try {
-        const job = await createJob(supabase, { mappingId: resolved.mappingId, kind: "import" });
-        jobId = job.id;
-      } catch (err) {
-        persistenceError = `job create failed: ${(err as Error).message}`;
-      }
-    } else {
-      persistenceError = "could not resolve or create a mapping row (has the F11 migration been applied?)";
+    if (!existing) {
+      return errorResponse(404, `job ${body.data.resumeJobId} not found`);
     }
-  }
-
-  const events: ImportEvent[] = [];
-  // Hooks persist per-batch cursors + per-table key maps to Supabase so
-  // a future resume can (a) audit which batches succeeded and (b) skip
-  // re-listing foreign tables. Hooks are best-effort inside importRows;
-  // failures land on stderr via `fireHook` and never abort the run. We
-  // additionally short-circuit if we already know jobId is null.
-  const persistHooks = jobId
-    ? {
-        onBatchStart: async (info: { table: string; batchIndex: number; kind: "create" | "update"; size: number }) =>
-          recordBatchStart(supabase, {
-            jobId: jobId!,
-            tableName: info.table,
-            batchIndex: info.batchIndex,
-            kind: info.kind,
-            size: info.size,
-          }),
-        onBatchComplete: async (info: { table: string; batchIndex: number; kind: "create" | "update"; status: "succeeded" | "failed" }) =>
-          recordBatchComplete(supabase, {
-            jobId: jobId!,
-            tableName: info.table,
-            batchIndex: info.batchIndex,
-            status: info.status,
-          }),
-        onKeyMapReady: async (table: string, entries: Record<string, string>) =>
-          upsertKeyMap(supabase, jobId!, table, entries),
-      }
-    : undefined;
-  let result: ImportResult;
-  try {
-    result = await importRows(
-      opsFromClientForImport(client),
-      {
-        schema: synth.schema,
-        tableIds: synth.tableIds,
-        source: synth.source,
-        fkOptions: synth.fkOptions,
-      },
-      { onEvent: (e) => events.push(e), signal: req.signal, hooks: persistHooks },
+    try {
+      await requeueJob(supabase, existing.id, {
+        inputSources: body.data.sources,
+        inputMappings: mappings,
+        inputPublish: publish,
+        dryRunSignature: body.data.dryRunSignature,
+      });
+    } catch (err) {
+      return errorResponse(500, `resume requeue failed: ${(err as Error).message}`);
+    }
+    try {
+      await inngest.send({
+        name: "import.execute.requested",
+        data: { jobId: existing.id },
+      });
+    } catch (err) {
+      return errorResponse(502, `enqueue failed: ${(err as Error).message}`);
+    }
+    return NextResponse.json(
+      { jobId: existing.id, status: "queued", resumed: true },
+      { status: 202 },
     );
-  } catch (err) {
-    // HubdbError's default .message is just "HubDB POST /path → status" —
-    // the actual "which cell got rejected" body lives on .responseBody. Pull
-    // it up so the surfaced message + response body are useful.
-    const hubdbErr = err instanceof HubdbError ? err : null;
-    if (hubdbErr) {
-      console.error(
-        `[execute] HubDB error ${hubdbErr.method} ${hubdbErr.path} → ${hubdbErr.status}:`,
-        JSON.stringify(hubdbErr.responseBody, null, 2),
-      );
-    }
-    const message =
-      err instanceof ImportPreflightError
-        ? `preflight failed on "${err.table}": ${err.message}`
-        : err instanceof ImportFailFastError
-          ? err.message
-          : err instanceof ImportCancelledError
-            ? err.message
-            : `import failed: ${(err as Error).message}`;
-    if (jobId) {
-      try {
-        if (err instanceof ImportFailFastError || err instanceof ImportCancelledError) {
-          const allErrors = err.partial.tables.flatMap((t) => t.errors);
-          await insertJobErrors(supabase, jobId, allErrors);
-        }
-        const status = err instanceof ImportCancelledError ? "cancelled" : "failed";
-        await completeJob(supabase, jobId, { status, error: message });
-      } catch (persistErr) {
-        persistenceError = (persistenceError ?? "") + ` · job complete failed: ${(persistErr as Error).message}`;
-      }
-    }
-    if (err instanceof ImportPreflightError) {
-      return errorResponse(409, message, { table: err.table, events, jobId, persistenceError });
-    }
-    if (err instanceof ImportFailFastError) {
-      // 422 — request is well-formed but the data triggered fail-fast
-      // policy. Echo the failing row + the partial result so the UI can
-      // render per-table totals up to the abort point.
-      return errorResponse(422, message, {
-        row: err.row,
-        result: err.partial,
-        events,
-        jobId,
-        persistenceError,
-      });
-    }
-    if (err instanceof ImportCancelledError) {
-      // 499 — non-standard but widely-recognized "client closed request".
-      // If the client aborted the fetch (likely), they won't see this
-      // response; the job row records the cancel so /jobs still tells the
-      // story after the fact.
-      return errorResponse(499, message, {
-        cancelled: true,
-        result: err.partial,
-        events,
-        jobId,
-        persistenceError,
-      });
-    }
-    return errorResponse(502, message, {
-      events,
-      jobId,
-      persistenceError,
-      hubspot: hubdbErr
-        ? { status: hubdbErr.status, path: hubdbErr.path, method: hubdbErr.method, body: hubdbErr.responseBody }
-        : undefined,
+  }
+
+  // Fresh run — resolve profile, create the job row in queued state.
+  const resolved = await resolveMappingId(supabase, id, body.data.profileId, mappings);
+  if (!resolved) {
+    return errorResponse(
+      500,
+      "could not resolve or create a mapping row (has the F11 migration been applied?)",
+    );
+  }
+
+  let jobId: string;
+  try {
+    const job = await createJob(supabase, {
+      mappingId: resolved.mappingId,
+      kind: "import",
+      status: "queued",
+      portalId: id,
+      inputSources: body.data.sources,
+      inputMappings: mappings,
+      inputPublish: publish,
+      dryRunSignature: body.data.dryRunSignature,
     });
+    jobId = job.id;
+  } catch (err) {
+    return errorResponse(500, `job create failed: ${(err as Error).message}`);
   }
 
-  const published: { table: string; publishedAt?: string; error?: string }[] = [];
-  const publish = body.data.publish;
-  if (publish !== "none") {
-    const targets =
-      publish === "all"
-        ? result.order
-        : result.order.slice(0, Math.max(0, result.order.length - 1));
-
-    for (const name of targets) {
-      const tableId = synth.tableIds[name];
-      if (!tableId) continue;
-      try {
-        const t = await pushLive(client, tableId);
-        published.push({ table: name, publishedAt: t.publishedAt });
-      } catch (err) {
-        published.push({ table: name, error: (err as Error).message });
-      }
-    }
+  try {
+    await inngest.send({
+      name: "import.execute.requested",
+      data: { jobId },
+    });
+  } catch (err) {
+    // We already created the job row; the client will see it in /jobs
+    // as queued forever. Still return the jobId so the UI can render
+    // a "stuck queued" state; the user can nudge by retriggering
+    // execute (which currently creates a new job — a follow-up could
+    // let us re-emit the event against the same jobId).
+    return errorResponse(502, `enqueue failed: ${(err as Error).message}`, { jobId });
   }
 
-  if (jobId) {
-    const durationMs = Date.now() - startedAt;
-    const publishedTables = published.filter((p) => !p.error).map((p) => p.table);
-    const totals = summarize(result, publish, publishedTables, durationMs);
-    const allErrors = result.tables.flatMap((t) => t.errors);
-    try {
-      await insertJobErrors(supabase, jobId, allErrors);
-      await completeJob(supabase, jobId, {
-        status: result.ok && published.every((p) => !p.error) ? "succeeded" : "failed",
-        totals,
-        error: result.ok ? null : `${allErrors.length} row error(s)`,
-      });
-    } catch (err) {
-      persistenceError =
-        (persistenceError ? persistenceError + " · " : "") +
-        `job finalize failed: ${(err as Error).message}`;
-    }
-  }
-
-  return NextResponse.json({
-    portal: { id: portal.id, label: portal.label, env: portal.env },
-    result,
-    events,
-    published,
-    jobId,
-    persistenceError,
-    autoSavedProfile: resolved?.autoSaved ?? false,
-  });
+  return NextResponse.json(
+    {
+      jobId,
+      status: "queued",
+      autoSavedProfile: resolved.autoSaved,
+      portal: { id: portal.id, label: portal.label, env: portal.env },
+    },
+    { status: 202 },
+  );
 }
