@@ -48,7 +48,7 @@ export function LoginForm({ next }: { next: string }) {
           value={email}
           onChange={(e) => setEmail(e.target.value)}
           placeholder="you@saltedstone.com"
-          className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/50"
+          className="h-9 w-full rounded-md border border-input bg-field px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/50"
         />
       </label>
       <label className="flex flex-col gap-1 text-sm">
@@ -60,7 +60,7 @@ export function LoginForm({ next }: { next: string }) {
           disabled={disabled}
           value={password}
           onChange={(e) => setPassword(e.target.value)}
-          className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/50"
+          className="h-9 w-full rounded-md border border-input bg-field px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/50"
         />
       </label>
       {state.kind === "error" ? (

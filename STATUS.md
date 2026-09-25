@@ -2,7 +2,45 @@
 
 Running log of where the HubDB Importer project is, what's in flight, and what's next. Update as we go.
 
-## Current state — 2026-09-27 (late morning)
+## Current state — 2026-09-27 (afternoon)
+
+**Form-control visibility pass + checkbox check-icon fix.** Two small but bite-y issues surfaced by the day's smoke testing. Both fixed in one pass.
+
+**1. Checkbox check icon didn't render on `checked` state.** Root cause: Tailwind's class scanner splits classes on whitespace, and the checkbox's `checked:bg-[url('data:image/svg+xml;utf8,<svg ...>')]` arbitrary-value class had literal spaces *inside* the SVG data URL (`viewBox="0 0 16 16"`, `xmlns=...`, `polyline points="3.5 8.5 6.5 11.5..."`). Scanner chopped one intended class into 15+ garbage fragments; only the tail piece survived (visible in the DOM as a stray `stroke-linejoin=%22round%22` attribute in the class list). Fix in `components/ui/checkbox.tsx`: URL-encode every literal space as `%20` inside the data URL. Trap worth remembering — **Tailwind arbitrary values cannot contain unencoded whitespace even inside quoted strings**; use `%20` or `_` (Tailwind's underscore-to-space convention).
+
+**2. Form controls blended into the page background.** `--background` (offwhite `#f1ece1`) was the page fill and inputs used `bg-background` / `bg-transparent`, so text inputs, textareas, selects, and file inputs had literally the same fill color as the page — no visual affordance that they were interactive. Cards were only one shade lighter (`#f8f4ea`), so inputs inside cards still blended.
+
+**Fix — introduce a `--field` fill token distinct from both page and card, then wire it in three layers so we don't chase individual components forever:**
+
+1. **`app/globals.css`** — new `--field: #ffffff` (light) / `rgb(241 236 225 / 8%)` (dark) token. Wired into `@theme inline` as `--color-field: var(--field)` so `bg-field` is a real Tailwind utility. Also bumped `--border` and `--input` from cream (`#d4cdba`, near-invisible against the offwhite page) to `#a89e82` — a darker sand-slate that reads clearly as a form-control edge without shouting
+2. **New base-layer rule** on all text-shaped inputs + textareas (`input[type="text|email|password|number|url|tel|search|date|datetime-local"]`, bare `input:not([type])`, `textarea`) that sets `background-color: var(--field)` and `border-color: var(--input)`. Baseline coverage so a `<input type="text">` with no Tailwind bg class still reads correctly
+3. **Sweep of 15 explicit `border-input bg-background` sites across 7 files** (Tailwind utilities beat base-layer rules — the base rule wasn't enough on its own): `login-form.tsx`, `register-form.tsx`, `portal-form.tsx` (3 inputs), `source-uploader.tsx` (5 inputs + 2 textareas + 2 file inputs), `schema-infer-panel.tsx`, `schema-planner.tsx` (textarea + file input), `profile-panel.tsx`. Also the two shadcn primitives that set their own bg: `select.tsx` trigger (`bg-transparent` → `bg-field`), `checkbox.tsx` (`bg-background` → `bg-field`)
+
+**Files touched:** `app/globals.css` (field token + border bump + base-layer rule), `components/ui/select.tsx` (trigger bg), `components/ui/checkbox.tsx` (bg + SVG URL-encoding fix), and 7 form-site files (`.tsx` sweep via `sed 's/border-input bg-background/border-input bg-field/g'`). 255 vitest cases still green (styling-only), tsc + lint clean
+
+**Design decisions worth remembering:**
+- **`--field` as a first-class token, not just a hex on each input.** Splits "surface" (background, card, popover) from "field" (input fill). Both dark and light modes get their own value; changing the field affordance across the whole app is now a one-line edit
+- **Base-layer rule + explicit `bg-field` sweep, not either alone.** Base rule alone was overridden by the many `bg-background` utilities on existing inputs (utilities layer wins the cascade). Sweep alone would miss any future bare `<input>`. Belt-and-suspenders — the base rule is the safety net; the utility sweep matches the app's explicit-style convention
+- **Border bumped from cream to `#a89e82`.** The `--border` and `--input` tokens both pointed at cream (`#d4cdba`), which was fine against the pure-white shadcn default but nearly invisible against the S2 warm cream palette. Darker sand-slate reads as a clear affordance without competing with content
+- **Pure white for `--field`, not warm off-white.** Considered `#faf7ee` (warm, matches palette) but pure `#ffffff` gives the strongest "this is an input" signal against the cream page. Easy to warm up later if the contrast feels harsh
+- **URL-encoding as the fix for Tailwind arbitrary values with spaces.** Tailwind's `_` → space convention would also work but is less legible in the SVG context. `%20` is standard URL encoding — future readers immediately recognize what's happening
+
+**Still open on `phases/phase-2.md`:**
+- OAuth flow for private Google Sheets (deferred)
+- Refresh-from-sheet action for saved mappings
+- Full cycle handling — two-phase write for cyclic FK graphs, self-reference end-to-end
+- F11 tail — re-run saved mapping against a different portal
+- Detect interrupted jobs on runner restart (Phase 3 with Inngest)
+- (Provision-writes-back-tableId — Phase-1 F3 polish carried over)
+
+**Next up (unblocked):**
+- **Sandbox smoke test of auth end-to-end** (register + login + logout + reject non-saltedstone.com)
+- **Google OAuth via Supabase Auth**
+- **Inngest step-function rewrite** — biggest unlock
+
+---
+
+## Prior state — 2026-09-27 (late morning)
 
 **Brand-color-per-section navigation + shared PageHeader component + auth-page logos + phase-tag cleanup.** Visual identity pass on top of the auth + checkbox work earlier today. Sidebar and every top-level page now share a per-section color from the S2 palette so the sidebar reads as a mini map of the app — you always know where you are.
 

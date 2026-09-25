@@ -200,7 +200,7 @@ export function SchemaPlanner({ portalId }: { portalId: string }) {
             onChange={(e) => setText(e.target.value)}
             disabled={busy}
             placeholder='{\n  "version": 1,\n  "tables": [ … ]\n}'
-            className="w-full rounded-md border border-input bg-background px-3 py-2 font-mono text-xs outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/50"
+            className="w-full rounded-md border border-input bg-field px-3 py-2 font-mono text-xs outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/50"
           />
         </label>
         <label className="flex flex-col gap-1 text-sm">
@@ -210,7 +210,7 @@ export function SchemaPlanner({ portalId }: { portalId: string }) {
             type="file"
             accept=".json,application/json"
             disabled={busy}
-            className="text-sm file:mr-3 file:rounded-md file:border file:border-input file:bg-background file:px-3 file:py-1.5 file:text-sm file:font-medium hover:file:bg-muted/60"
+            className="text-sm file:mr-3 file:rounded-md file:border file:border-input file:bg-field file:px-3 file:py-1.5 file:text-sm file:font-medium hover:file:bg-muted/60"
           />
         </label>
         <div className="flex items-center gap-3">

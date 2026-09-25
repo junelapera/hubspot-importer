@@ -63,7 +63,7 @@ export function PortalForm() {
             required
             maxLength={100}
             disabled={disabled}
-            className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/50"
+            className="h-9 w-full rounded-md border border-input bg-field px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/50"
           />
         </Field>
         <Field label="Environment">
@@ -89,7 +89,7 @@ export function PortalForm() {
             pattern="[0-9]*"
             maxLength={20}
             disabled={disabled}
-            className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/50"
+            className="h-9 w-full rounded-md border border-input bg-field px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/50"
           />
         </Field>
         <Field label="Private-app token" hint="pat-…" full>
@@ -100,7 +100,7 @@ export function PortalForm() {
             minLength={10}
             disabled={disabled}
             autoComplete="off"
-            className="h-9 w-full rounded-md border border-input bg-background px-3 font-mono text-sm outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/50"
+            className="h-9 w-full rounded-md border border-input bg-field px-3 font-mono text-sm outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/50"
           />
         </Field>
       </div>

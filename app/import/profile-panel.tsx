@@ -323,7 +323,7 @@ export function ProfilePanel({
               onChange={(e) => setSaveName(e.target.value)}
               placeholder="profile name"
               disabled={saving}
-              className="h-9 min-w-[12rem] flex-1 rounded-md border border-input bg-background px-3 text-sm"
+              className="h-9 min-w-[12rem] flex-1 rounded-md border border-input bg-field px-3 text-sm"
             />
             <Button size="sm" onClick={save} disabled={saving || !saveName.trim() || !hasMappings}>
               {saving ? "Saving…" : "Save"}

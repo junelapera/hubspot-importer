@@ -17,7 +17,7 @@ export const Checkbox = forwardRef<HTMLInputElement, CheckboxProps>(
         ref={ref}
         type="checkbox"
         className={cn(
-          "peer size-4 shrink-0 appearance-none rounded-[4px] border border-input bg-background transition-colors",
+          "peer size-4 shrink-0 appearance-none rounded-[4px] border border-input bg-field transition-colors",
           "checked:border-primary checked:bg-primary",
           "focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none",
           "disabled:cursor-not-allowed disabled:opacity-50",
@@ -25,7 +25,7 @@ export const Checkbox = forwardRef<HTMLInputElement, CheckboxProps>(
           // checked state. The trick is that background-image can't inherit
           // currentColor, so we ship two versions (transparent when unchecked,
           // primary-foreground when checked).
-          "checked:bg-[url('data:image/svg+xml;utf8,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 16 16%22 fill=%22none%22 stroke=%22white%22 stroke-width=%223%22 stroke-linecap=%22round%22 stroke-linejoin=%22round%22><polyline points=%223.5 8.5 6.5 11.5 12.5 5.5%22/></svg>')]",
+          "checked:bg-[url('data:image/svg+xml;utf8,<svg%20xmlns=%22http://www.w3.org/2000/svg%22%20viewBox=%220%200%2016%2016%22%20fill=%22none%22%20stroke=%22white%22%20stroke-width=%223%22%20stroke-linecap=%22round%22%20stroke-linejoin=%22round%22><polyline%20points=%223.5%208.5%206.5%2011.5%2012.5%205.5%22/></svg>')]",
           "checked:bg-center checked:bg-no-repeat",
           className,
         )}

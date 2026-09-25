@@ -478,7 +478,7 @@ export function SourceUploader({ portals }: { portals: PortalSummary[] }) {
                 multiple
                 required
                 disabled={disabled}
-                className="text-sm file:mr-3 file:rounded-md file:border file:border-input file:bg-background file:px-3 file:py-1.5 file:text-sm file:font-medium hover:file:bg-muted/60"
+                className="text-sm file:mr-3 file:rounded-md file:border file:border-input file:bg-field file:px-3 file:py-1.5 file:text-sm file:font-medium hover:file:bg-muted/60"
               />
               <span className="text-xs text-muted-foreground">
                 Table name is derived from the filename (extension stripped).
@@ -575,7 +575,7 @@ export function SourceUploader({ portals }: { portals: PortalSummary[] }) {
                 multiple
                 required
                 disabled={disabled}
-                className="text-sm file:mr-3 file:rounded-md file:border file:border-input file:bg-background file:px-3 file:py-1.5 file:text-sm file:font-medium hover:file:bg-muted/60"
+                className="text-sm file:mr-3 file:rounded-md file:border file:border-input file:bg-field file:px-3 file:py-1.5 file:text-sm file:font-medium hover:file:bg-muted/60"
               />
               <span className="text-xs text-muted-foreground">
                 Each sheet becomes a table. Single-sheet workbooks use the filename; multi-sheet
@@ -591,7 +591,7 @@ export function SourceUploader({ portals }: { portals: PortalSummary[] }) {
                   type="text"
                   disabled={disabled}
                   placeholder="brands, categories, products"
-                  className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/50"
+                  className="h-9 w-full rounded-md border border-input bg-field px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/50"
                 />
                 <span className="text-xs text-muted-foreground">
                   Comma-separated names. Blank = all sheets.
@@ -680,7 +680,7 @@ export function SourceUploader({ portals }: { portals: PortalSummary[] }) {
                     }}
                     disabled={disabled}
                     placeholder={i === 0 ? "table name (e.g. brands)" : "table name"}
-                    className="h-9 rounded-md border border-input bg-background px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/50"
+                    className="h-9 rounded-md border border-input bg-field px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/50"
                   />
                   <input
                     type="url"
@@ -691,7 +691,7 @@ export function SourceUploader({ portals }: { portals: PortalSummary[] }) {
                     }}
                     disabled={disabled}
                     placeholder="https://docs.google.com/spreadsheets/d/e/…/pub?output=csv&gid=…"
-                    className="h-9 rounded-md border border-input bg-background px-3 font-mono text-xs outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/50"
+                    className="h-9 rounded-md border border-input bg-field px-3 font-mono text-xs outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/50"
                   />
                   <Button
                     type="button"
@@ -769,7 +769,7 @@ export function SourceUploader({ portals }: { portals: PortalSummary[] }) {
                 rows={10}
                 disabled={disabled}
                 placeholder={'{\n  "brands": [{ "slug": "acme", "name": "Acme" }],\n  "categories": [{ "name": "Tools" }]\n}'}
-                className="w-full rounded-md border border-input bg-background px-3 py-2 font-mono text-xs outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/50"
+                className="w-full rounded-md border border-input bg-field px-3 py-2 font-mono text-xs outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/50"
               />
               <span className="text-xs text-muted-foreground">
                 Accepts <code>{`{ "table": [rows] }`}</code> or{" "}
@@ -846,7 +846,7 @@ function InputField({
       <input
         name={name}
         disabled={disabled}
-        className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/50"
+        className="h-9 w-full rounded-md border border-input bg-field px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/50"
         {...rest}
       />
       {hint ? <span className="text-xs text-muted-foreground">{hint}</span> : null}

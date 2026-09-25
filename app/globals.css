@@ -25,6 +25,7 @@
   --color-chart-1: var(--chart-1);
   --color-ring: var(--ring);
   --color-input: var(--input);
+  --color-field: var(--field);
   --color-border: var(--border);
   --color-destructive: var(--destructive);
   --color-accent-foreground: var(--accent-foreground);
@@ -91,8 +92,9 @@
   --accent: var(--color-brand-yellow);
   --accent-foreground: var(--color-brand-forest);
   --destructive: var(--color-brand-red);
-  --border: var(--color-brand-sand);
-  --input: var(--color-brand-cream);
+  --border: #a89e82;                  /* sand darkened for stronger form-control edge */
+  --input: #a89e82;                   /* same as border — inputs need to read as bordered */
+  --field: #ffffff;                   /* pure white — strong contrast vs. cream page/card */
   --ring: var(--color-brand-ochre);
   --chart-1: var(--color-brand-ochre);
   --chart-2: var(--color-brand-coffee);
@@ -126,8 +128,9 @@
   --accent: var(--color-brand-yellow);
   --accent-foreground: var(--color-brand-forest);
   --destructive: var(--color-brand-red);
-  --border: rgb(241 236 225 / 15%);
-  --input: rgb(241 236 225 / 15%);
+  --border: rgb(241 236 225 / 25%);
+  --input: rgb(241 236 225 / 30%);
+  --field: rgb(241 236 225 / 8%);     /* subtle lift off the dark card */
   --ring: var(--color-brand-ochre);
   --chart-1: var(--color-brand-ochre);
   --chart-2: var(--color-brand-butter);
@@ -167,5 +170,24 @@
   input[type="number"] {
     -moz-appearance: textfield;
     appearance: textfield;
+  }
+
+  /* Baseline fill + border for every text-like input and textarea so they
+     read as interactive fields against the warm cream page/card. Component
+     classes (e.g. `bg-transparent` on the Select trigger) can still opt out;
+     the two shadcn primitives that set their own bg are updated explicitly. */
+  input[type="text"],
+  input[type="email"],
+  input[type="password"],
+  input[type="number"],
+  input[type="url"],
+  input[type="tel"],
+  input[type="search"],
+  input[type="date"],
+  input[type="datetime-local"],
+  input:not([type]),
+  textarea {
+    background-color: var(--field);
+    border-color: var(--input);
   }
 }
