@@ -42,12 +42,20 @@ See `docs/mapping-canvas.md` for the full design. Scoped as a phased build; item
 - [ ] `MappingState.canvasLayout` field for node positions (optional; round-trips through profile `state_json`)
 - [ ] Validate button runs client-side checks before dry run
 
-### Phase B — Inline column transforms (~1-2 weeks)
-- [ ] `lib/transforms.ts` with pure `applyTransforms(rows, transforms[])`
-- [ ] `MappingState.transforms` field (tagged union: rename / trim / casefold / split / drop / join)
+### Phase B — Inline column transforms (~2-3 weeks)
+Scope expanded 2026-10-02 after a real client import (Prime Capital locations) surfaced 4 synthesis transforms we hadn't accounted for. See `docs/mapping-canvas.md` worked example.
+- [ ] `lib/transforms.ts` with pure `applyTransforms(rows, transforms[])` + deterministic order (rename → trim/casefold → drop → synthesis → split → join)
+- [ ] `MappingState.transforms` tagged union
+- [ ] Edit-in-place: **rename / trim / casefold / drop**
+- [ ] Synthesis: **template** (`"{City}, {State}"` with `{col|modifier}` modifiers — lower/upper/trim/slugify only)
+- [ ] Synthesis: **slugify** (URL-safe lowercase hyphenated from one or more cols)
+- [ ] Synthesis: **lookup** (dictionary expand, e.g. `AL → Alabama`; `onMissing: pass-through | null | fail`)
+- [ ] Synthesis: **constant** (same value every row; for boilerplate + static FK lists)
+- [ ] Expand: **split** by delimiter → N named columns
+- [ ] Enrich: **join** against another source — one hop only, `onMissing: null | fail | skip-row`
 - [ ] Right-click column port on canvas for transform actions
 - [ ] Live sample preview as transforms are added
-- [ ] "Add column by join" — one hop only, `onMissing: null | fail | skip-row`
+- [ ] Collision validation on save (no transform may produce an existing column name except via rename)
 
 ### Phase C — Export normalized files (~3 days)
 - [ ] `POST /api/portals/[id]/export` runs resolver without HubSpot write, returns ZIP of CSVs
