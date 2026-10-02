@@ -212,8 +212,11 @@ export function MappingEditor({
 
       {target ? (
         <>
+          <p className="text-[10px] text-muted-foreground sm:hidden">
+            Scroll the table sideways to see all columns →
+          </p>
           <div className="overflow-x-auto rounded-md border border-border">
-            <table className="w-full text-xs">
+            <table className="w-full min-w-[640px] text-xs">
               <thead className="bg-muted/60 text-left">
                 <tr>
                   <th className="px-3 py-2 font-medium">Source column</th>
@@ -256,13 +259,13 @@ export function MappingEditor({
                       </td>
                       <td className="px-3 py-2">
                         {assignment.kind === "mapped" ? (
-                          <label className="inline-flex items-center gap-1.5">
+                          <label className="inline-flex cursor-pointer items-center gap-2 rounded px-1 py-0.5 hover:bg-muted/50">
                             <Checkbox
-                              className="size-3.5"
+                              className="size-4"
                               checked={value.naturalKey.includes(h)}
                               onChange={() => toggleNaturalKey(h)}
                             />
-                            <span className="text-[11px] text-muted-foreground">key</span>
+                            <span className="text-xs text-foreground">key</span>
                           </label>
                         ) : (
                           <span className="text-muted-foreground">—</span>

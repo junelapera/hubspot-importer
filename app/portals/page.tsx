@@ -1,8 +1,10 @@
 import Link from "next/link";
+import { ArrowRight } from "lucide-react";
 import { listPortals } from "@/lib/db/portals";
 import { createSupabaseServerClient } from "@/lib/db/supabase";
 import { PortalForm } from "./portal-form";
 import { PAGE_ACCENTS, PageHeader } from "@/components/ui/page-header";
+import { ErrorCard } from "@/components/ui/error-card";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -18,7 +20,7 @@ export default async function PortalsPage() {
   }
 
   return (
-    <main className="mx-auto max-w-3xl px-6 py-12 space-y-10">
+    <main className="mx-auto max-w-5xl px-6 py-12 space-y-10">
       <PageHeader
         icon={PAGE_ACCENTS.portals.icon}
         accentColor={PAGE_ACCENTS.portals.color}
@@ -27,10 +29,7 @@ export default async function PortalsPage() {
       />
 
       {loadError ? (
-        <section className="rounded-md border border-destructive/30 bg-destructive/10 p-4 text-sm">
-          <p className="font-medium text-destructive">Could not load portals</p>
-          <pre className="mt-2 overflow-x-auto whitespace-pre-wrap text-xs text-destructive/80">{loadError}</pre>
-        </section>
+        <ErrorCard error={loadError} />
       ) : (
         <section className="space-y-3">
           <h2 className="text-sm font-semibold">Connected ({portals.length})</h2>
@@ -50,9 +49,10 @@ export default async function PortalsPage() {
                   </span>
                   <Link
                     href={`/portals/${p.id}/schema`}
-                    className="text-xs underline underline-offset-2 hover:text-foreground"
+                    className="inline-flex items-center gap-1 text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground"
                   >
-                    schema →
+                    schema
+                    <ArrowRight aria-hidden="true" className="size-3" />
                   </Link>
                 </li>
               ))}
@@ -71,11 +71,6 @@ export default async function PortalsPage() {
         </p>
       </section>
 
-      <footer className="pt-6 text-xs text-muted-foreground">
-        <Link href="/" className="underline underline-offset-2">
-          ← Home
-        </Link>
-      </footer>
     </main>
   );
 }

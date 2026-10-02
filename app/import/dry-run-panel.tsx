@@ -20,7 +20,7 @@ export function DryRunPanel({
   portalId: string;
   sources: DryRunSource[];
   mappings: Record<string, MappingState>;
-  onComplete?: (signature: string) => void;
+  onComplete?: (signature: string, report: DryRunReport) => void;
 }) {
   const [stage, setStage] = useState<Stage>({ kind: "idle" });
 
@@ -42,7 +42,7 @@ export function DryRunPanel({
         return;
       }
       setStage({ kind: "done", report: body.report });
-      if (body.signature) onComplete?.(body.signature);
+      if (body.signature) onComplete?.(body.signature, body.report);
     } catch (err) {
       setStage({ kind: "error", message: (err as Error).message });
     }
@@ -80,8 +80,23 @@ export function DryRunPanel({
 
 function ReportView({ report }: { report: DryRunReport }) {
   const unresolved = report.tables.flatMap((t) => t.unresolvedFks);
+  const totals = report.tables.reduce(
+    (acc, t) => ({
+      create: acc.create + t.planned.create,
+      update: acc.update + t.planned.update,
+      skipped: acc.skipped + t.planned.skipped,
+    }),
+    { create: 0, update: 0, skipped: 0 },
+  );
   return (
     <div className="space-y-4">
+      <dl className="grid grid-cols-2 gap-2 rounded-md border border-border bg-muted/20 p-3 text-xs sm:grid-cols-5">
+        <Headline label="Tables" value={report.tables.length} />
+        <Headline label="Will create" value={totals.create} tone={totals.create > 0 ? "green" : undefined} />
+        <Headline label="Will update" value={totals.update} tone={totals.update > 0 ? "blue" : undefined} />
+        <Headline label="Will skip" value={totals.skipped} />
+        <Headline label="Unresolved FKs" value={unresolved.length} tone={unresolved.length > 0 ? "amber" : undefined} />
+      </dl>
       <ul className="space-y-3">
         {report.tables.map((t) => (
           <li key={t.sourceName}><TableReport table={t} /></li>
@@ -157,6 +172,23 @@ function TableReport({ table }: { table: DryRunTableReport }) {
         </details>
       ) : null}
     </article>
+  );
+}
+
+function Headline({ label, value, tone }: { label: string; value: number; tone?: "green" | "blue" | "amber" }) {
+  const cls =
+    tone === "green"
+      ? "text-emerald-700 dark:text-emerald-300"
+      : tone === "blue"
+        ? "text-blue-700 dark:text-blue-300"
+        : tone === "amber"
+          ? "text-yellow-800 dark:text-yellow-200"
+          : "text-foreground";
+  return (
+    <div>
+      <dt className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</dt>
+      <dd className={`text-base font-semibold ${cls}`}>{value.toLocaleString()}</dd>
+    </div>
   );
 }
 

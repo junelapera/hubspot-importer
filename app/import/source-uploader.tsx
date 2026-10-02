@@ -14,6 +14,7 @@ import {
 import { ImportOrderPanel } from "./import-order-panel";
 import { DryRunPanel } from "./dry-run-panel";
 import { ExecutePanel } from "./execute-panel";
+import type { DryRunReport } from "@/lib/dry-run";
 import { ProfilePanel } from "./profile-panel";
 import { SchemaInferPanel } from "./schema-infer-panel";
 import { deriveImportOrder } from "@/lib/mapping";
@@ -93,6 +94,14 @@ export function SourceUploader({ portals }: { portals: PortalSummary[] }) {
   // Cleared whenever sources/mappings change (either edit or profile load)
   // so ExecutePanel can gate on a fresh dry run.
   const [dryRunSignature, setDryRunSignature] = useState<string | null>(null);
+  // Projected batch total from the most recent dry run. Threaded to ExecutePanel
+  // so the "N of M batches" progress indicator can show real completion %.
+  const [dryRunProjectedBatches, setDryRunProjectedBatches] = useState<number | null>(null);
+
+  function invalidateDryRun() {
+    setDryRunSignature(null);
+    setDryRunProjectedBatches(null);
+  }
   // gsheets tab: dynamic list of {tableName, url} pairs. Start with one row.
   const [gsheetRows, setGsheetRows] = useState<{ tableName: string; url: string }[]>([
     { tableName: "", url: "" },
@@ -203,7 +212,7 @@ export function SourceUploader({ portals }: { portals: PortalSummary[] }) {
     setMappings({});
     setSelectedProfileId(null);
     setGsheetRows([{ tableName: "", url: "" }]);
-    setDryRunSignature(null);
+    invalidateDryRun();
     setState({ kind: "idle" });
   }
 
@@ -243,13 +252,13 @@ export function SourceUploader({ portals }: { portals: PortalSummary[] }) {
 
   function updateMapping(sourceName: string, next: MappingState) {
     setMappings((prev) => ({ ...prev, [sourceName]: next }));
-    setDryRunSignature(null);
+    invalidateDryRun();
   }
 
   function loadProfile(next: Record<string, MappingState>, profileId: string) {
     setMappings(next);
     setSelectedProfileId(profileId);
-    setDryRunSignature(null);
+    invalidateDryRun();
   }
 
   const currentSourceNames =
@@ -267,7 +276,7 @@ export function SourceUploader({ portals }: { portals: PortalSummary[] }) {
         return;
       }
       setState({ kind: "success", response: payload });
-      setDryRunSignature(null);
+      invalidateDryRun();
     } catch (err) {
       setState({ kind: "error", message: (err as Error).message });
     }
@@ -285,7 +294,7 @@ export function SourceUploader({ portals }: { portals: PortalSummary[] }) {
         return;
       }
       setState({ kind: "success", response: payload });
-      setDryRunSignature(null);
+      invalidateDryRun();
     } catch (err) {
       setState({ kind: "error", message: (err as Error).message });
     }
@@ -313,7 +322,7 @@ export function SourceUploader({ portals }: { portals: PortalSummary[] }) {
         return;
       }
       setState({ kind: "success", response: payload });
-      setDryRunSignature(null);
+      invalidateDryRun();
     } catch (err) {
       setState({ kind: "error", message: (err as Error).message });
     }
@@ -340,7 +349,7 @@ export function SourceUploader({ portals }: { portals: PortalSummary[] }) {
         return;
       }
       setState({ kind: "success", response: body });
-      setDryRunSignature(null);
+      invalidateDryRun();
     } catch (err) {
       setState({ kind: "error", message: (err as Error).message });
     }
@@ -348,8 +357,48 @@ export function SourceUploader({ portals }: { portals: PortalSummary[] }) {
 
   const disabled = state.kind === "submitting" || portals.length === 0;
 
+  // Derive wizard-step status from existing state. Pure derivation so adding
+  // new steps or renaming is a one-line change — no new state needed.
+  const wizardSteps = (() => {
+    const hasPortal = Boolean(portalId);
+    const hasSources = state.kind === "success";
+    const sourceNames = hasSources ? state.response.tables.map((t) => t.name) : [];
+    const mappingsReady =
+      sourceNames.length > 0 &&
+      sourceNames.every((n) => {
+        const m = mappings[n];
+        return Boolean(m && m.targetTableName && m.naturalKey.length > 0);
+      });
+    const dryRunReady = dryRunSignature !== null;
+    return [
+      { id: "portal", label: "Portal", status: hasPortal ? "done" : "active" },
+      {
+        id: "sources",
+        label: "Sources",
+        status: hasSources ? "done" : hasPortal ? "active" : "pending",
+      },
+      {
+        id: "mapping",
+        label: "Mapping",
+        status: mappingsReady ? "done" : hasSources ? "active" : "pending",
+      },
+      {
+        id: "dry-run",
+        label: "Dry run",
+        status: dryRunReady ? "done" : mappingsReady ? "active" : "pending",
+      },
+      {
+        id: "execute",
+        label: "Execute",
+        status: dryRunReady ? "active" : "pending",
+      },
+    ] as const;
+  })();
+
   return (
     <div className="space-y-8">
+      <WizardStepper steps={wizardSteps} />
+
       {resumeJobId ? (
         <section className="space-y-1 rounded-md border border-primary/40 bg-primary/5 p-4 text-sm">
           <p className="font-semibold">Resuming job {resumeJobId}</p>
@@ -804,10 +853,55 @@ export function SourceUploader({ portals }: { portals: PortalSummary[] }) {
           profileId={selectedProfileId}
           resumeJobId={resumeJobId}
           dryRunSignature={dryRunSignature}
-          onDryRunComplete={setDryRunSignature}
+          dryRunProjectedBatches={dryRunProjectedBatches}
+          onDryRunComplete={(sig, report) => {
+            setDryRunSignature(sig);
+            setDryRunProjectedBatches(report.projectedApiCalls);
+          }}
         />
       ) : null}
     </div>
+  );
+}
+
+type WizardStepStatus = "pending" | "active" | "done";
+type WizardStep = { id: string; label: string; status: WizardStepStatus };
+
+function WizardStepper({ steps }: { steps: readonly WizardStep[] }) {
+  return (
+    <nav aria-label="Import wizard progress" className="rounded-md border border-border bg-muted/20 p-3">
+      <ol className="flex flex-wrap items-center gap-1 text-xs sm:gap-2">
+        {steps.map((step, i) => {
+          const isLast = i === steps.length - 1;
+          const circleCls =
+            step.status === "done"
+              ? "bg-primary text-primary-foreground border-primary"
+              : step.status === "active"
+                ? "bg-background text-primary border-primary"
+                : "bg-background text-muted-foreground border-border";
+          const labelCls =
+            step.status === "done"
+              ? "text-foreground"
+              : step.status === "active"
+                ? "text-foreground font-medium"
+                : "text-muted-foreground";
+          return (
+            <li key={step.id} className="flex items-center gap-1 sm:gap-2">
+              <span
+                aria-current={step.status === "active" ? "step" : undefined}
+                className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full border text-[10px] font-semibold tabular-nums ${circleCls}`}
+              >
+                {step.status === "done" ? "✓" : i + 1}
+              </span>
+              <span className={labelCls}>{step.label}</span>
+              {!isLast ? (
+                <span aria-hidden="true" className="mx-1 h-px w-6 bg-border sm:w-10" />
+              ) : null}
+            </li>
+          );
+        })}
+      </ol>
+    </nav>
   );
 }
 
@@ -917,6 +1011,7 @@ function Results({
   profileId,
   resumeJobId,
   dryRunSignature,
+  dryRunProjectedBatches,
   onDryRunComplete,
 }: {
   response: ParseResponse;
@@ -929,7 +1024,8 @@ function Results({
   profileId: string | null;
   resumeJobId: string | null;
   dryRunSignature: string | null;
-  onDryRunComplete: (signature: string) => void;
+  dryRunProjectedBatches: number | null;
+  onDryRunComplete: (signature: string, report: DryRunReport) => void;
 }) {
   return (
     <section className="space-y-6">
@@ -983,6 +1079,7 @@ function Results({
                 profileId={profileId}
                 resumeJobId={resumeJobId}
                 dryRunSignature={dryRunSignature}
+                projectedBatches={dryRunProjectedBatches}
                 disabled={false}
                 disabledReason="Run a dry run first — execute is gated on a matching dry-run signature."
               />

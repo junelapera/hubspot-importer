@@ -1,7 +1,10 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { ArrowRight } from "lucide-react";
 import { getJobById, listJobErrors } from "@/lib/db/jobs";
 import { createSupabaseServerClient } from "@/lib/db/supabase";
+import { Breadcrumbs } from "@/components/ui/breadcrumbs";
+import { ErrorCard } from "@/components/ui/error-card";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -25,11 +28,14 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
   const durationMs = totals?.durationMs;
 
   return (
-    <main className="mx-auto max-w-5xl space-y-6 p-6">
+    <main className="mx-auto max-w-5xl px-6 py-12 space-y-6">
+      <Breadcrumbs
+        items={[
+          { label: "Jobs", href: "/jobs" },
+          { label: job?.id ? `Job ${shortId(job.id)}` : "Job" },
+        ]}
+      />
       <header className="space-y-1">
-        <Link href="/jobs" className="text-xs underline text-muted-foreground">
-          ← Back to jobs
-        </Link>
         <h1 className="text-xl font-semibold">Job {job?.id}</h1>
         {job ? (
           <p className="text-sm text-muted-foreground">
@@ -46,11 +52,7 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
         ) : null}
       </header>
 
-      {loadError ? (
-        <p className="rounded-md border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">
-          Could not load job: {loadError}
-        </p>
-      ) : null}
+      {loadError ? <ErrorCard error={loadError} /> : null}
 
       {job ? (
         <>
@@ -87,9 +89,10 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
               </p>
               <Link
                 href={`/import?resume=${job.id}&portalId=${job.portalId}&mappingId=${job.mappingId}`}
-                className="inline-block rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/80"
+                className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/80"
               >
-                Resume in wizard →
+                Resume in wizard
+                <ArrowRight aria-hidden="true" className="size-4" />
               </Link>
             </section>
           ) : null}
@@ -196,6 +199,10 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
       ) : null}
     </main>
   );
+}
+
+function shortId(id: string): string {
+  return id.length > 8 ? id.slice(0, 8) + "…" : id;
 }
 
 function Stat({ label, value }: { label: string; value: string }) {

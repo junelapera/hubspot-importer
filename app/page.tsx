@@ -3,7 +3,7 @@ import { PAGE_ACCENTS, PageHeader } from "@/components/ui/page-header";
 
 export default function Home() {
   return (
-    <main className="mx-auto max-w-3xl px-6 py-16 space-y-10">
+    <main className="mx-auto max-w-5xl px-6 py-12 space-y-10">
       <PageHeader
         icon={PAGE_ACCENTS.home.icon}
         accentColor={PAGE_ACCENTS.home.color}

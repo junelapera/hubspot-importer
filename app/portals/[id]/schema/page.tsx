@@ -1,4 +1,3 @@
-import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getPortalById, getPortalToken } from "@/lib/db/portals";
 import { createSupabaseServerClient } from "@/lib/db/supabase";
@@ -8,6 +7,8 @@ import { DropTableButton } from "./drop-table-button";
 import { RefreshButton } from "./refresh-button";
 import { SchemaPlanner } from "./schema-planner";
 import { PAGE_ACCENTS, PageHeader } from "@/components/ui/page-header";
+import { ErrorCard } from "@/components/ui/error-card";
+import { Breadcrumbs } from "@/components/ui/breadcrumbs";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -34,7 +35,13 @@ export default async function PortalSchemaPage({ params }: Props) {
   }
 
   return (
-    <main className="mx-auto max-w-4xl px-6 py-12 space-y-8">
+    <main className="mx-auto max-w-5xl px-6 py-12 space-y-8">
+      <Breadcrumbs
+        items={[
+          { label: "Portals", href: "/portals" },
+          { label: portal.label },
+        ]}
+      />
       <PageHeader
         icon={PAGE_ACCENTS.portals.icon}
         accentColor={PAGE_ACCENTS.portals.color}
@@ -61,11 +68,39 @@ export default async function PortalSchemaPage({ params }: Props) {
         <RefreshButton />
       </section>
 
+      <details className="rounded-md border border-border bg-muted/20 p-3 text-xs text-muted-foreground">
+        <summary className="cursor-pointer font-medium text-foreground">
+          About draft vs. published state
+        </summary>
+        <div className="mt-2 space-y-2">
+          <p>
+            Every HubDB table has two parallel copies — a <strong>draft</strong> and a{" "}
+            <strong>live</strong> (published) version. Schema changes, row inserts, and row updates
+            all write to the draft first. The live copy is what HubL and{" "}
+            <code className="rounded bg-muted px-1">/rows</code> API reads serve to your pages until
+            you explicitly promote the draft via <code className="rounded bg-muted px-1">push-live</code>.
+          </p>
+          <p>
+            This page shows the <strong>draft</strong> column list — the shape a subsequent write
+            would see. A{" "}
+            <span className="rounded border border-emerald-500/40 bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-emerald-700 dark:text-emerald-300">
+              published
+            </span>{" "}
+            badge means the table has been pushed live at least once; a{" "}
+            <span className="rounded border border-border bg-muted px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+              draft only
+            </span>{" "}
+            table exists in the portal but isn&apos;t visible on your site yet.
+          </p>
+          <p>
+            The import wizard writes new rows to draft and promotes them live based on the{" "}
+            <em>Publish</em> option on the Execute step.
+          </p>
+        </div>
+      </details>
+
       {fetchError ? (
-        <section className="rounded-md border border-destructive/30 bg-destructive/10 p-4 text-sm">
-          <p className="font-medium text-destructive">Introspection failed</p>
-          <pre className="mt-2 overflow-x-auto whitespace-pre-wrap text-xs text-destructive/80">{fetchError}</pre>
-        </section>
+        <ErrorCard error={fetchError} />
       ) : snapshot && snapshot.tables.length === 0 ? (
         <p className="rounded-md border border-border bg-muted/40 p-4 text-sm text-muted-foreground">
           No HubDB tables in this portal yet.
@@ -81,12 +116,6 @@ export default async function PortalSchemaPage({ params }: Props) {
       ) : null}
 
       <SchemaPlanner portalId={id} />
-
-      <footer className="pt-6 text-xs text-muted-foreground">
-        <Link href="/portals" className="underline underline-offset-2">
-          ← All portals
-        </Link>
-      </footer>
     </main>
   );
 }
@@ -132,7 +161,7 @@ function TableCard({
       ) : null}
 
       <div className="overflow-x-auto rounded-md border border-border">
-        <table className="w-full text-xs">
+        <table className="w-full min-w-[480px] text-xs">
           <thead className="bg-muted/60 text-left">
             <tr>
               <th className="px-3 py-2 font-medium">Column</th>

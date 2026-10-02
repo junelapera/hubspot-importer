@@ -84,6 +84,7 @@ export function ExecutePanel({
   profileId,
   resumeJobId,
   dryRunSignature,
+  projectedBatches,
   disabled,
   disabledReason,
 }: {
@@ -93,20 +94,27 @@ export function ExecutePanel({
   profileId?: string | null;
   resumeJobId?: string | null;
   dryRunSignature: string | null;
+  // From the dry run — total batches we expect to run. Used for the progress bar.
+  projectedBatches: number | null;
   disabled: boolean;
   disabledReason?: string;
 }) {
   const [publish, setPublish] = useState<PublishMode>("foreign-only");
   const [stage, setStage] = useState<Stage>({ kind: "idle" });
+  // Second-granularity re-render tick for the live elapsed/ETA counter while
+  // polling (the poll tick fires every 2s and only updates batch counts).
+  const [, setClockTick] = useState(0);
   const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const clockTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const jobIdRef = useRef<string | null>(null);
   const autoSavedRef = useRef<boolean>(false);
 
-  // Clean up the poll timer on unmount so an unmounted panel doesn't
+  // Clean up the poll + clock timers on unmount so an unmounted panel doesn't
   // keep hitting the API forever.
   useEffect(() => {
     return () => {
       if (pollTimerRef.current) clearInterval(pollTimerRef.current);
+      if (clockTimerRef.current) clearInterval(clockTimerRef.current);
     };
   }, []);
 
@@ -114,6 +122,10 @@ export function ExecutePanel({
     if (pollTimerRef.current) {
       clearInterval(pollTimerRef.current);
       pollTimerRef.current = null;
+    }
+    if (clockTimerRef.current) {
+      clearInterval(clockTimerRef.current);
+      clockTimerRef.current = null;
     }
   }
 
@@ -271,6 +283,8 @@ export function ExecutePanel({
         () => void pollOnce(body.jobId!, startedAt),
         POLL_INTERVAL_MS,
       );
+      // Independent 1s clock tick so elapsed + ETA update even between poll ticks.
+      clockTimerRef.current = setInterval(() => setClockTick((n) => n + 1), 1000);
     } catch (err) {
       stopPolling();
       setStage({ kind: "error", message: (err as Error).message });
@@ -356,33 +370,7 @@ export function ExecutePanel({
       ) : null}
 
       {stage.kind === "polling" && stage.jobId ? (
-        <div className="rounded-md border border-border bg-muted/20 p-3 text-xs space-y-1">
-          <p>
-            <span className="font-medium">Job</span>{" "}
-            <a href={`/jobs/${stage.jobId}`} className="underline">
-              <code className="rounded bg-muted px-1">{stage.jobId}</code>
-            </a>
-            {" · "}
-            <span className="capitalize">{stage.status}</span>
-            {stage.cancelling ? " · cancel requested" : null}
-          </p>
-          <p className="text-muted-foreground">
-            {stage.batchesDone} batch{stage.batchesDone === 1 ? "" : "es"} completed
-            {stage.totals?.tables && stage.totals.tables.length > 0 ? (
-              <>
-                {" · tables so far: "}
-                {stage.totals.tables.map((t) => (
-                  <span key={t.name} className="mr-1">
-                    <code className="rounded bg-muted px-1 text-foreground">{t.name}</code>
-                    <span className="text-emerald-700 dark:text-emerald-300"> +{t.created}</span>
-                    {t.updated > 0 ? <span className="text-blue-700 dark:text-blue-300"> ~{t.updated}</span> : null}
-                    {t.errors > 0 ? <span className="text-destructive"> !{t.errors}</span> : null}
-                  </span>
-                ))}
-              </>
-            ) : null}
-          </p>
-        </div>
+        <ProgressCard stage={stage} projectedBatches={projectedBatches} />
       ) : null}
 
       {stage.kind === "error" ? (
@@ -461,6 +449,114 @@ export function ExecutePanel({
       ) : null}
     </section>
   );
+}
+
+function ProgressCard({
+  stage,
+  projectedBatches,
+}: {
+  stage: Extract<Stage, { kind: "polling" }>;
+  projectedBatches: number | null;
+}) {
+  // Explicit live-clock render — the parent re-renders this component every
+  // second via setClockTick, and we need the current time to compute elapsed.
+  // Suppressing react-hooks/purity for this specific display-only reading.
+  // eslint-disable-next-line react-hooks/purity
+  const elapsedMs = Date.now() - new Date(stage.startedAt).getTime();
+  const total = projectedBatches && projectedBatches > 0 ? projectedBatches : null;
+  // Clamp percent at 99% until the terminal state flips to "done" — avoids
+  // the awkward "100%" that sits there for a few seconds while the publish
+  // step runs after the last import batch completes.
+  const percent =
+    total !== null
+      ? Math.min(99, Math.round((stage.batchesDone / total) * 100))
+      : null;
+  // ETA = (elapsed / done) * remaining — simple linear estimate. Only show
+  // once we have 2+ batches so the first-batch latency doesn't dominate.
+  const etaMs =
+    total !== null && stage.batchesDone >= 2 && stage.batchesDone < total
+      ? Math.round((elapsedMs / stage.batchesDone) * (total - stage.batchesDone))
+      : null;
+  return (
+    <div className="space-y-3 rounded-md border border-border bg-muted/20 p-3 text-xs">
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <p>
+          <span className="font-medium">Job</span>{" "}
+          <a href={`/jobs/${stage.jobId}`} className="underline">
+            <code className="rounded bg-muted px-1">{stage.jobId}</code>
+          </a>
+          {" · "}
+          <span className="capitalize">{stage.status}</span>
+          {stage.cancelling ? <span className="text-yellow-700 dark:text-yellow-300"> · cancel requested</span> : null}
+        </p>
+        <p className="text-muted-foreground tabular-nums">
+          {total !== null ? (
+            <>
+              {stage.batchesDone} of {total} batches
+              {percent !== null ? <span className="ml-1">· {percent}%</span> : null}
+            </>
+          ) : (
+            <>{stage.batchesDone} batch{stage.batchesDone === 1 ? "" : "es"} completed</>
+          )}
+          <span className="ml-2">· elapsed {formatDuration(elapsedMs)}</span>
+          {etaMs !== null ? <span className="ml-1">· eta ~{formatDuration(etaMs)}</span> : null}
+        </p>
+      </div>
+      {total !== null ? (
+        <div
+          role="progressbar"
+          aria-valuenow={stage.batchesDone}
+          aria-valuemin={0}
+          aria-valuemax={total}
+          className="h-1.5 w-full overflow-hidden rounded-full bg-muted"
+        >
+          <div
+            className="h-full bg-primary transition-all duration-500 ease-out"
+            style={{ width: `${percent ?? 0}%` }}
+          />
+        </div>
+      ) : (
+        <div
+          role="progressbar"
+          aria-valuetext="indeterminate"
+          className="h-1.5 w-full overflow-hidden rounded-full bg-muted"
+        >
+          <div className="h-full w-1/3 animate-pulse rounded-full bg-primary/70" />
+        </div>
+      )}
+      {stage.totals?.tables && stage.totals.tables.length > 0 ? (
+        <ul className="flex flex-wrap gap-1.5">
+          {stage.totals.tables.map((t) => (
+            <li
+              key={t.name}
+              className="inline-flex items-baseline gap-1 rounded border border-border bg-background px-2 py-0.5 tabular-nums"
+            >
+              <code className="text-foreground">{t.name}</code>
+              {t.created > 0 ? <span className="text-emerald-700 dark:text-emerald-300">+{t.created}</span> : null}
+              {t.updated > 0 ? <span className="text-blue-700 dark:text-blue-300">~{t.updated}</span> : null}
+              {t.skipped > 0 ? <span className="text-muted-foreground">·{t.skipped}</span> : null}
+              {t.errors > 0 ? <span className="text-destructive">!{t.errors}</span> : null}
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="text-muted-foreground">
+          Waiting for the first batch to complete… this is normal — the preflight step runs first.
+        </p>
+      )}
+    </div>
+  );
+}
+
+function formatDuration(ms: number): string {
+  const totalSec = Math.max(0, Math.floor(ms / 1000));
+  if (totalSec < 60) return `${totalSec}s`;
+  const m = Math.floor(totalSec / 60);
+  const s = totalSec % 60;
+  if (m < 60) return s === 0 ? `${m}m` : `${m}m ${s}s`;
+  const h = Math.floor(m / 60);
+  const mm = m % 60;
+  return mm === 0 ? `${h}h` : `${h}h ${mm}m`;
 }
 
 function ResultView({

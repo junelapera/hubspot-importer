@@ -2,7 +2,65 @@
 
 Running log of where the HubDB Importer project is, what's in flight, and what's next. Update as we go.
 
-## Current state — 2026-09-28
+## Current state — 2026-10-02
+
+**UI/UX pass + mapping-canvas design doc shipped.** A single-session polish round that cleared the top 5 items from a broader UX audit, swept navigation chrome (arrow icons + breadcrumbs + unified max-widths), and wrote up the next big feature (visual relationship canvas) as a doc for review before any implementation starts. No backend changes — the import pipeline, Inngest runner, and auth are all untouched. 255 vitest / 19 suites still green, tsc + lint clean.
+
+**UX top-5 shipped:**
+
+1. **Execute panel progress visibility** (`app/import/execute-panel.tsx`, `app/import/dry-run-panel.tsx`, `app/import/source-uploader.tsx`) — the dry-run report's `projectedApiCalls` is threaded through to the execute panel as a `projectedBatches` prop. New `ProgressCard` component renders a real progress bar, "N of M batches · 42% · elapsed 1m 12s · eta ~45s", per-table running counters as compact chips, and an indeterminate striped bar when no projected total is available. A 1s clock interval runs alongside the 2s poll interval so elapsed + ETA update between polls. Dry-run panel also gains a headline totals row (`Tables / Will create / Will update / Will skip / Unresolved FKs`) so users don't have to expand each per-table report to see pass/fail at a glance
+2. **Import wizard step indicator** (`app/import/source-uploader.tsx`) — new `WizardStepper` component at the top of `/import` shows Portal → Sources → Mapping → Dry run → Execute. Status (pending / active / done) derived purely from existing state — no new state field. Checkmarks on done, outlined circle + bold label on active, muted on pending. Orients users in a 15-section vertical page
+3. **Responsive tables** (`app/jobs/page.tsx`, `app/import/mapping-editor.tsx`, `app/portals/[id]/schema/page.tsx`) — Jobs: desktop table hidden under `lg`, mobile card layout above (shows status / portal / mapping / created / updated / errors in a compact 2-row card). Mapping + schema tables got `min-w-[640px]` / `min-w-[480px]` to force horizontal scroll with a mobile-only "Scroll the table sideways →" hint. Natural-key checkbox bumped from `size-3.5` to `size-4` with a bigger clickable label pad
+4. **Friendlier error messages** (`lib/error-copy.ts` new + `components/ui/error-card.tsx` new, used on portals/schema/jobs/import pages) — pure translator classifies raw errors into `{title, detail, hint, raw}`. Covers Supabase 521 (project paused — the current blocker), missing table/column (migration not applied), HubSpot 401 (bad token), 429 (rate limit), CSV parse errors, network failure, portal-token-missing. Falls back cleanly for unknown errors with the raw message under a disclosure. Replaces 4 inline `<section className="rounded-md border border-destructive/30 ...">` blocks across server pages
+5. **Draft vs. published schema explainer** (`app/portals/[id]/schema/page.tsx`) — collapsed `<details>` block explains the HubDB draft/live model, shows both badges inline for recognition, and ties back to the Execute step's Publish option. Core concept was surfaced via badges without a sentence of context before
+
+**Navigation chrome sweep (follow-up pass):**
+
+6. **Breadcrumbs** (`components/ui/breadcrumbs.tsx` new) — shared component with lucide `ChevronRight` separators and `aria-current="page"` on the leaf. Wired into `/portals/[id]/schema` (Portals › {label}) and `/jobs/[id]` (Jobs › Job {shortId}). Removed the redundant `← Back to jobs` / `← All portals` footer links on nested routes — breadcrumbs replace them
+7. **Icon-based nav arrows** (lucide `ArrowRight`) — swept text arrows (`schema →`, `details →`, `Resume in wizard →`) on `app/portals/page.tsx`, `app/jobs/page.tsx` (both desktop table + mobile card variants), and `app/jobs/[id]/page.tsx`. Dropped the `← Home` footer links on Portals and Import (sidebar already covers Home navigation — the footer links were vestigial). Kept prose arrows that aren't navigation (file-menu paths `File → Save As`, type coercion `products → brands`, cycle-break visualizations) — the sweep is about *nav* arrows, not every `→` glyph
+8. **Unified `max-w-5xl`** across all primary pages — Home (`3xl` → `5xl`), Portals (`3xl` → `5xl`), Import (`4xl` → `5xl`), Schema (`4xl` → `5xl`), Jobs list (added `py-12`), Jobs detail (added `py-12`). Standard shape is now `mx-auto max-w-5xl px-6 py-12`. Intentional exceptions: Docs stays at `max-w-6xl` because of its sidebar grid; Login/Register stays at `max-w-md` for narrow auth cards
+
+**Mapping canvas design doc** (`docs/mapping-canvas.md` new):
+
+Design doc for the next big feature idea — a visual drag-n-drop relationship editor to replace the per-source `ForeignKeyPanel` config for larger (5-10 table) imports. Three distinct features phased separately so we can ship small and iterate:
+
+- **Phase A — relationship canvas (visualization only, ~1 week)** — React Flow nodes per source + target table, columns as ports, drag-to-connect FK edges. 100% backed by existing `MappingState` — zero backend changes
+- **Phase B — inline column transforms (~1-2 weeks)** — rename / trim / casefold / split / drop / join-against-another-table. The "add column by join" sub-feature is the balloon risk; scoped to one hop only
+- **Phase C — export normalized files (~3 days)** — download ZIP of resolved CSVs for audit/portability. Reuses dry-run resolver
+
+Doc explicitly lists non-goals (no expression language, no filtering, no aggregation, no cross-import canvas library, no multi-step joins, no auto-layout in v1) so future scope-creep conversations have a cheap "see non-goals" answer. Recommendation: build Phase A as a 1-week spike, use it on a real portal, then decide B+C. Linked from `phases/phase-3.md` as a new section with checkbox breakdown. Everything else in the doc is reviewable; no implementation started
+
+**Files touched:** `lib/error-copy.ts` (new), `components/ui/error-card.tsx` (new), `components/ui/breadcrumbs.tsx` (new), `docs/mapping-canvas.md` (new), `app/import/execute-panel.tsx` (+~150 lines ProgressCard), `app/import/dry-run-panel.tsx` (+headline totals row + onComplete signature change), `app/import/source-uploader.tsx` (+WizardStepper + `invalidateDryRun` helper + projectedBatches threading), `app/import/mapping-editor.tsx` (table min-width + hint + bigger checkbox), `app/import/page.tsx` (max-w + ErrorCard), `app/jobs/page.tsx` (responsive table/card split + ErrorCard + icons), `app/jobs/[id]/page.tsx` (Breadcrumbs + icon + ErrorCard + shortId), `app/portals/page.tsx` (max-w + ErrorCard + icons), `app/portals/[id]/schema/page.tsx` (Breadcrumbs + ErrorCard + draft/published explainer + max-w), `app/page.tsx` (max-w), `phases/phase-3.md` (mapping-canvas section). 255 vitest cases / 19 suites still green, tsc + lint clean, dev server returning 200s
+
+**Design decisions worth remembering:**
+- **ProgressCard renders live `Date.now()` during render** with an eslint-disable comment — the parent re-renders this component every second via `setClockTick`, so Date.now is explicitly the display source. Alternatives (useSyncExternalStore, moving time into state via useEffect) add ceremony without value for a display-only clock
+- **99% percent clamp during polling** — avoids the awkward "100%" that would sit there for a few seconds while the publish step runs after the last import batch completes. Terminal state flipping to `done` renders a fresh non-progress view
+- **ETA requires ≥2 completed batches before showing** — first-batch latency dominates the single-sample estimate. Simple `(elapsed / done) * remaining` linear projection; good enough for a user-facing hint
+- **WizardStepper status is derived, not stored** — pure function of existing state (`hasPortal` / `hasSources` / `mappingsReady` / `dryRunReady`). Adding a new step is a one-line change — no new state field, no migration, no persistence
+- **ErrorCard moved raw error under a `<details>` disclosure** — users get the friendly title + hint by default, but devs can still copy the raw message when debugging. Keeps the UI calm without hiding diagnostic info
+- **Breadcrumbs replaced one-off back links**, not supplemented them — the redundant `← Back to jobs` + `← All portals` footer links on nested pages got deleted. Two navigation affordances for the same action is clutter. Breadcrumbs win because they also show the hierarchy, not just the parent
+- **Jobs page uses two parallel renders** (`hidden lg:block` table + `lg:hidden` cards) rather than a single responsive table with hidden columns. The card layout rearranges fields (status chip to top-left, portal below, totals in a flat row) — can't be achieved by just hiding `<td>`s. Duplicates the row-building logic but keeps each layout clean
+- **max-w-5xl as the standard** — wide enough for mapping tables + wizard panels on desktop without hitting edge-of-world line lengths; narrow enough that Portals / Home don't feel sparse. Docs stays wider (6xl) because its sidebar grid eats layout room; auth pages stay narrow (md) because wide auth cards look amateurish
+- **Mapping canvas doc is Phase 3 material**, not Phase 2 — Phase 2 still has refresh-from-sheet + OAuth-sheets + full cycle handling as unticked items. Canvas is a bigger feature and warrants its own planning cycle. Linked from Phase 3 so future-you doesn't miss it
+
+**Still open on `phases/phase-2.md`:**
+- OAuth flow for private Google Sheets (deferred)
+- Refresh-from-sheet action for saved mappings
+- Full cycle handling — two-phase write for cyclic FK graphs, self-reference end-to-end
+- F11 tail — re-run saved mapping against a different portal
+- Google OAuth via Supabase Auth
+- (Provision-writes-back-tableId — Phase-1 F3 polish carried over)
+
+**Next up (unblocked):**
+- **Resume Supabase** (currently paused, 521 from Cloudflare) — the whole app is dead until this comes back. Reproduces as `ErrorCard` titled "Supabase is unreachable" with the hint pointing at the dashboard
+- **End-to-end verification** of the new UI chrome on a real 5-table import once Supabase is back — can't visually test the ProgressCard fill, WizardStepper transitions, breadcrumb hover states, or responsive jobs layout from a dev server alone
+- **Mapping canvas Phase A spike** — if the design doc looks right after a review pass, 1-week scope to prove the UX pattern
+
+**Manual step required to activate:** none for this round — all changes are additive UI. No new env vars, no new migrations, no new deps.
+
+---
+
+## Prior state — 2026-09-28
 
 **Inngest step-function runner shipped — `/api/portals/[id]/execute` is now enqueue-and-return.** The biggest architectural change since Phase 1 landed. The old synchronous executor blocked the request thread for the entire import + push-live sweep, hitting the Vercel `maxDuration: 300` ceiling on anything over ~3-4k rows and dying whenever the user closed the tab. The rewrite splits into: (a) fast API route that validates + persists + enqueues, (b) Inngest step function that runs `importRows` + `pushLive` out of band with automatic retries, (c) polling endpoint the client hits every 2s for progress + final response. Tab close, browser crash, deploy mid-run — the job outlives all of them.
 

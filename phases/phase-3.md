@@ -30,3 +30,26 @@
 - [ ] Locked mapping — content-ops cannot edit relations/columns
 - [ ] Per-portal user access control
 - [ ] Read-only job history view for content-ops
+
+## Mapping canvas (visual relationship editor + inline cleanup)
+See `docs/mapping-canvas.md` for the full design. Scoped as a phased build; items here match that doc's phase breakdown.
+
+### Phase A — Relationship canvas (visualization only, ~1 week)
+- [ ] Add `@xyflow/react` dep (code-split so form-view users don't pay the ~45kb)
+- [ ] `MappingCanvas` component: nodes per source + target table, columns as ports, drag-to-connect FK edges
+- [ ] Edge-side-panel reuses existing FK config fields (`multi`, `delimiter`, `onMissing`, `matchKey`)
+- [ ] `[form | canvas]` toggle on `/import` (persist choice per portal in sessionStorage)
+- [ ] `MappingState.canvasLayout` field for node positions (optional; round-trips through profile `state_json`)
+- [ ] Validate button runs client-side checks before dry run
+
+### Phase B — Inline column transforms (~1-2 weeks)
+- [ ] `lib/transforms.ts` with pure `applyTransforms(rows, transforms[])`
+- [ ] `MappingState.transforms` field (tagged union: rename / trim / casefold / split / drop / join)
+- [ ] Right-click column port on canvas for transform actions
+- [ ] Live sample preview as transforms are added
+- [ ] "Add column by join" — one hop only, `onMissing: null | fail | skip-row`
+
+### Phase C — Export normalized files (~3 days)
+- [ ] `POST /api/portals/[id]/export` runs resolver without HubSpot write, returns ZIP of CSVs
+- [ ] Toolbar button: "Download prepared files (.zip)"
+- [ ] ZIP includes `README.txt` with applied transforms + mapping snapshot
