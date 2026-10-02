@@ -40,3 +40,7 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# client example data — kept locally for design-doc grounding (see docs/mapping-canvas.md)
+# but contains real client PII (addresses, team names, portal URLs) so never commit
+/docs/example-data/
