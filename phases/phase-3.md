@@ -34,13 +34,18 @@
 ## Mapping canvas (visual relationship editor + inline cleanup)
 See `docs/mapping-canvas.md` for the full design. Scoped as a phased build; items here match that doc's phase breakdown.
 
-### Phase A — Relationship canvas (visualization only, ~1 week)
-- [ ] Add `@xyflow/react` dep (code-split so form-view users don't pay the ~45kb)
-- [ ] `MappingCanvas` component: nodes per source + target table, columns as ports, drag-to-connect FK edges
-- [ ] Edge-side-panel reuses existing FK config fields (`multi`, `delimiter`, `onMissing`, `matchKey`)
-- [ ] `[form | canvas]` toggle on `/import` (persist choice per portal in sessionStorage)
-- [ ] `MappingState.canvasLayout` field for node positions (optional; round-trips through profile `state_json`)
+### Phase A — Relationship canvas (visualization only, spiked 2026-10-02)
+- [x] Add `@xyflow/react` dep (plain import for the spike — code-splitting via `next/dynamic` deferred)
+- [x] `MappingCanvas` component: nodes per source table, columns as handle ports, drag-to-connect FK edges backed by existing `MappingState.foreignKeys`
+- [x] Double-click edge → delete (also Delete/Backspace when selected)
+- [x] Draggable table cards via React Flow's `useNodesState` (positions survive mapping edits; cross-session persistence deferred)
+- [x] Fullscreen toggle via native Fullscreen API with `fitView` on resize
+- [x] `[Form | Canvas]` toggle on `/import` (persists per portal in sessionStorage alongside the rest of the wizard state)
+- [ ] Target tables as separate nodes (currently source-only — target is shown as a header label on each source card). `portalTables` prop is already wired through for this
+- [ ] Edge-side-panel reuses existing FK config fields (`multi`, `delimiter`, `onMissing`, `matchKey`) — users currently delete + recreate to change settings
+- [ ] `MappingState.canvasLayout` field for cross-session position persistence (round-trips through profile `state_json`)
 - [ ] Validate button runs client-side checks before dry run
+- [ ] Code-split canvas behind `next/dynamic` so form-view users don't pay the ~45kb
 
 ### Phase B — Inline column transforms (~2-3 weeks)
 Scope expanded 2026-10-02 after a real client import (Prime Capital locations) surfaced 4 synthesis transforms we hadn't accounted for. See `docs/mapping-canvas.md` worked example.

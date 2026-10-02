@@ -1,6 +1,6 @@
 # Mapping canvas — visual relationship editor + inline cleanup
 
-> **Status: proposal, not scheduled.** Design doc only. Review before any implementation work starts. Discussed + validated against a real import on 2026-10-02 (June Lapera + Claude).
+> **Status: Phase A spiked 2026-10-02.** `app/import/mapping-canvas.tsx` landed as a working proof of concept — React Flow nodes per source table, draggable cards with grid-seeded positions, drag-to-connect FK edges backed by existing `MappingState`, double-click or Delete-key edge removal, native-API fullscreen toggle. Toggle `[Form | Canvas]` on `/import` persists per portal in sessionStorage. Phase B (inline transforms) + Phase C (export) still unscheduled; worked example and the rest of this doc are the plan for those. Design conversation history preserved below for context.
 
 ## Worked example: Prime Capital Financial locations
 

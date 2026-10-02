@@ -2,7 +2,53 @@
 
 Running log of where the HubDB Importer project is, what's in flight, and what's next. Update as we go.
 
-## Current state — 2026-10-02
+## Current state — 2026-10-02 (afternoon)
+
+**Mapping canvas Phase A spiked.** The visual relationship editor from `docs/mapping-canvas.md` now exists as a working proof of concept behind a `[Form | Canvas]` toggle on `/import`. Builds on React Flow (`@xyflow/react@12.12.0`), reuses existing `MappingState` end-to-end — zero backend changes, zero migrations, same `importRows` / dry run / execute pipeline. Doc + Phase 3 checklist updated to reflect what landed vs. what's still open; the design-conversation history and Phase B/C scope stay in the doc for the next cycle.
+
+**What the canvas does today:**
+- One React Flow node per source table — card with header (`source_name → target_table`), column list with left (target) + right (source) handles, natural keys marked with a filled star, mapped columns show `→ target_col`, FK columns show an `FK` chip
+- Drag between column handles to create an FK edge — immediately writes to `MappingState.foreignKeys[sourceCol]` with sensible defaults (`multi: false, delimiter: ",", onMissing: "null", matching: "default"`). If an FK already exists on that source column, the drag swaps the target but preserves user-set `multi` / `delimiter` / `onMissing`
+- Double-click an edge → deletes it (also Delete/Backspace when selected). Hint banner above the canvas explains the interactions
+- Draggable table cards via React Flow's `useNodesState` — positions survive mapping edits (add/remove FK, pick target) but reset on component unmount. Cross-session position persistence via `MappingState.canvasLayout` is deferred
+- Fullscreen toggle via the native Fullscreen API — expands the canvas to viewport, re-fits view on resize via `requestAnimationFrame`+`fitView`, Esc exits cleanly
+- Toggle `[Form | Canvas]` on the Results section — form view is default and unchanged. Canvas view renders the graph then shows the source previews below (data visibility preserved; only the FK config UI changes). Toggle choice persists per portal in sessionStorage alongside the rest of the wizard state
+
+**What the canvas doesn't do yet** (follow-up spikes, all tracked in `phases/phase-3.md`):
+- Target HubDB tables as separate nodes — currently source-only; target is shown as a header label on each source card. `portalTables` prop is already threaded through for this
+- Edge-click side panel for FK config (`multi` / `delimiter` / `onMissing`) — users currently delete + recreate to change settings
+- Cross-session position persistence via `MappingState.canvasLayout`
+- Validate button for client-side checks before dry run
+- Code-split via `next/dynamic` so form-view users don't pay the ~45kb — plain import for the spike
+
+**Design decisions worth remembering:**
+- **React Flow owns the nodes array, not us.** First attempt tracked positions in a separate `useState` + rebuilt nodes from `useMemo` on every mapping change. That caused flicker — RF's drag updates and the external re-derivation fought each other on every drag tick (console warning: *"you are trying to drag a node that is not initialized"*). Fix was `useNodesState` from RF + a one-way `useEffect` that merges fresh data into the existing node state **without overwriting `position`**. The sync preserves position/selection/dragging flags per node; brand-new sources get the default grid position via `defaultPosition(i)`
+- **ReactFlowProvider wrap is required** when any child needs `useReactFlow()`. The fullscreen refit uses `fitView` from that hook, so the component exports `MappingCanvas` as the provider wrapper and `MappingCanvasInner` holds the real logic
+- **Node data derived from `allSources + mappings`, edges derived from `mappings.foreignKeys`** — never duplicate state. The `useEffect` sync is one-way (external → RF nodes). User interactions (drag, connect, delete) go through RF callbacks (`onNodesChange`, `onConnect`, `onEdgesDelete`, `onEdgeDoubleClick`) that call `onMappingChange` to update the parent. Round-trips cleanly
+- **Positions aren't persisted across sessions.** sessionStorage already carries `mappings`; adding `canvasLayout` to `MappingState` would persist via existing profile save/load infra. Deferred because the spike's goal was to prove the drag + connect UX works, not to productionize storage
+- **Fullscreen uses the native Fullscreen API, not a CSS fixed-position modal.** Native API gives real escape-key handling, works inside sandboxed iframes, and composes with browser fullscreen UI. Fails quiet if denied (e.g., programmatic call without a user gesture). `fitView` on `fullscreenchange` runs inside `requestAnimationFrame` so the layout flush completes first — otherwise fitView reads stale dimensions and the fit misses
+- **Double-click to delete, not single-click.** Single-click opens the edit panel in the full version; keeping it unassigned for the spike means the eventual edit UX won't need a breaking change. Delete via Delete/Backspace on selection is the keyboard power-user path
+- **Hint banner over automatic discovery.** The design doc stance was "canvas needs to feel discoverable without a tutorial." A one-line banner above the canvas (*"Drag a card to move it · drag between column dots to create an FK · double-click a connection to delete"*) covers the three main gestures. If users keep missing the delete gesture we can add a hover-affordance delete button on edges later
+- **Grid layout, not auto-layout.** Nodes seed at `{(i%3)*320, floor(i/3)*320}` — three per row, 320px apart. Auto-layout via dagre/elkjs is an explicit non-goal for v1 per the design doc; manual positioning is fine for 5-10 nodes
+
+**Files touched:** `app/import/mapping-canvas.tsx` (new, ~310 lines), `app/import/source-uploader.tsx` (view toggle + sessionStorage field + Results props + `ViewToggle` component), `docs/mapping-canvas.md` (status banner updated — now "Phase A spiked" instead of "proposal"), `phases/phase-3.md` (Phase A checkbox items ticked, follow-up items split out). `package.json` + `pnpm-lock.yaml` for the `@xyflow/react@12.12.0` dep. 255 vitest / 19 suites still green, tsc + lint clean
+
+**Known rough edges from the spike** (OK to ship as-is, worth noting):
+- No visual affordance that an edge is selected other than React Flow's default style — a user might not realize they can press Delete after clicking
+- `portalTables` prop is passed through but unused — flagged with `eslint-disable @typescript-eslint/no-unused-vars` and a comment explaining it's reserved for the "target tables as separate nodes" follow-up spike
+- Fullscreen button is small — easy to miss. Could be more prominent, but keeping it low-key for the spike
+
+**Next up (unblocked):**
+- **Use the canvas on a real import** — once a 5+ table import comes through, validate whether the current gesture set is enough or whether the edge-click side panel is the first thing to add
+- **Target tables as separate nodes** — unblocks visualizing the full source→target shape, not just source-to-source FKs. Should be mechanical given `portalTables` is already wired
+- **Edge-click side panel** — reuse the existing `ForeignKeyPanel` content; probably the biggest UX improvement after target-table nodes
+- **Phase B transforms** (template / slugify / lookup / constant / rename / trim / split / drop / join) — the real pain-killer per the Prime Capital worked example. Deliberately not touching this until the canvas gesture set is validated
+
+**Manual step required to activate:** none — pure UI addition. Reload `/import` after any session, toggle to **Canvas**, drag away.
+
+---
+
+## Prior state — 2026-10-02 (morning)
 
 **UI/UX pass + mapping-canvas design doc shipped.** A single-session polish round that cleared the top 5 items from a broader UX audit, swept navigation chrome (arrow icons + breadcrumbs + unified max-widths), and wrote up the next big feature (visual relationship canvas) as a doc for review before any implementation starts. No backend changes — the import pipeline, Inngest runner, and auth are all untouched. 255 vitest / 19 suites still green, tsc + lint clean.
 

@@ -14,6 +14,7 @@ import {
 import { ImportOrderPanel } from "./import-order-panel";
 import { DryRunPanel } from "./dry-run-panel";
 import { ExecutePanel } from "./execute-panel";
+import { MappingCanvas } from "./mapping-canvas";
 import type { DryRunReport } from "@/lib/dry-run";
 import { ProfilePanel } from "./profile-panel";
 import { SchemaInferPanel } from "./schema-infer-panel";
@@ -48,12 +49,14 @@ type ParseResponse = {
 };
 
 type Mode = "csv" | "xlsx" | "json" | "gsheets";
+type MappingView = "form" | "canvas";
 
 type SessionState = {
   mode?: Mode;
   mappings?: Record<string, MappingState>;
   selectedProfileId?: string | null;
   gsheetRows?: { tableName: string; url: string }[];
+  mappingView?: MappingView;
 };
 
 const SESSION_KEY_PREFIX = "hubdb-importer:wizard:";
@@ -106,6 +109,9 @@ export function SourceUploader({ portals }: { portals: PortalSummary[] }) {
   const [gsheetRows, setGsheetRows] = useState<{ tableName: string; url: string }[]>([
     { tableName: "", url: "" },
   ]);
+  // Mapping-view toggle (Phase A canvas spike). Form is default — canvas is
+  // additive for the 5-10 table cases the form view handles awkwardly.
+  const [mappingView, setMappingView] = useState<MappingView>("form");
   // sessionStorage-backed wizard state. Persist mode + mappings +
   // selectedProfileId + gsheetRows so navigating to /portals/[id]/schema and
   // back doesn't drop everything. Raw parsed rows are NOT persisted (too big
@@ -174,6 +180,9 @@ export function SourceUploader({ portals }: { portals: PortalSummary[] }) {
       if (Array.isArray(saved.gsheetRows) && saved.gsheetRows.length > 0) {
         setGsheetRows(saved.gsheetRows);
       }
+      if (saved.mappingView === "form" || saved.mappingView === "canvas") {
+        setMappingView(saved.mappingView);
+      }
       /* eslint-enable react-hooks/set-state-in-effect */
     } catch {
       // ignore parse errors — treat as no saved state
@@ -194,7 +203,7 @@ export function SourceUploader({ portals }: { portals: PortalSummary[] }) {
       gsheetRows.some((r) => r.tableName || r.url);
     try {
       if (hasContent) {
-        const payload: SessionState = { mode, mappings, selectedProfileId, gsheetRows };
+        const payload: SessionState = { mode, mappings, selectedProfileId, gsheetRows, mappingView };
         window.sessionStorage.setItem(sessionKey(portalId), JSON.stringify(payload));
       } else {
         window.sessionStorage.removeItem(sessionKey(portalId));
@@ -202,7 +211,7 @@ export function SourceUploader({ portals }: { portals: PortalSummary[] }) {
     } catch {
       // sessionStorage might be full or disabled — silently skip
     }
-  }, [portalId, mode, mappings, selectedProfileId, gsheetRows]);
+  }, [portalId, mode, mappings, selectedProfileId, gsheetRows, mappingView]);
 
   function clearSession() {
     if (typeof window === "undefined" || !portalId) return;
@@ -858,6 +867,8 @@ export function SourceUploader({ portals }: { portals: PortalSummary[] }) {
             setDryRunSignature(sig);
             setDryRunProjectedBatches(report.projectedApiCalls);
           }}
+          mappingView={mappingView}
+          onMappingViewChange={setMappingView}
         />
       ) : null}
     </div>
@@ -902,6 +913,39 @@ function WizardStepper({ steps }: { steps: readonly WizardStep[] }) {
         })}
       </ol>
     </nav>
+  );
+}
+
+function ViewToggle({
+  value,
+  onChange,
+}: {
+  value: MappingView;
+  onChange: (next: MappingView) => void;
+}) {
+  const options: { id: MappingView; label: string }[] = [
+    { id: "form", label: "Form" },
+    { id: "canvas", label: "Canvas" },
+  ];
+  return (
+    <div role="group" aria-label="Mapping view" className="inline-flex rounded-md border border-border bg-background p-0.5 text-xs">
+      {options.map((opt) => (
+        <button
+          key={opt.id}
+          type="button"
+          onClick={() => onChange(opt.id)}
+          aria-pressed={value === opt.id}
+          className={
+            "rounded px-2.5 py-1 font-medium transition-colors " +
+            (value === opt.id
+              ? "bg-foreground text-background"
+              : "text-muted-foreground hover:text-foreground")
+          }
+        >
+          {opt.label}
+        </button>
+      ))}
+    </div>
   );
 }
 
@@ -1013,6 +1057,8 @@ function Results({
   dryRunSignature,
   dryRunProjectedBatches,
   onDryRunComplete,
+  mappingView,
+  onMappingViewChange,
 }: {
   response: ParseResponse;
   portalId: string;
@@ -1026,6 +1072,8 @@ function Results({
   dryRunSignature: string | null;
   dryRunProjectedBatches: number | null;
   onDryRunComplete: (signature: string, report: DryRunReport) => void;
+  mappingView: MappingView;
+  onMappingViewChange: (next: MappingView) => void;
 }) {
   return (
     <section className="space-y-6">
@@ -1084,24 +1132,55 @@ function Results({
                 disabledReason="Run a dry run first — execute is gated on a matching dry-run signature."
               />
             ) : null}
-            {response.tables.map((t) => {
-          const source = allSources.find((s) => s.name === t.name)!;
-          const mapping = mappings[t.name] ?? initialMappingState();
-          return (
-            <div key={t.name} className="space-y-3">
-              <TableCard table={t} />
-              {portalSchemaState === "ready" ? (
-                <MappingEditor
-                  source={source}
+            {portalSchemaState === "ready" ? (
+              <div className="flex items-center justify-between gap-3 rounded-md border border-border bg-muted/20 px-3 py-2">
+                <div className="text-xs">
+                  <span className="font-medium">Mapping view</span>
+                  <span className="ml-2 text-muted-foreground">
+                    {mappingView === "canvas"
+                      ? "Visual canvas — drag between column ports to create FK relationships (experimental)"
+                      : "Form view — per-source config panels"}
+                  </span>
+                </div>
+                <ViewToggle value={mappingView} onChange={onMappingViewChange} />
+              </div>
+            ) : null}
+
+            {mappingView === "canvas" && portalSchemaState === "ready" ? (
+              <>
+                <MappingCanvas
                   allSources={allSources}
                   portalTables={portalTables}
-                  value={mapping}
-                  onChange={(next) => onMappingChange(t.name, next)}
+                  mappings={mappings}
+                  onMappingChange={onMappingChange}
                 />
-              ) : null}
-            </div>
-          );
-        })}
+                {/* Keep source previews below the canvas so users can still
+                    see sample rows + parse warnings per table. Mapping config
+                    moves to the canvas; data visibility stays. */}
+                {response.tables.map((t) => (
+                  <TableCard key={t.name} table={t} />
+                ))}
+              </>
+            ) : (
+              response.tables.map((t) => {
+                const source = allSources.find((s) => s.name === t.name)!;
+                const mapping = mappings[t.name] ?? initialMappingState();
+                return (
+                  <div key={t.name} className="space-y-3">
+                    <TableCard table={t} />
+                    {portalSchemaState === "ready" ? (
+                      <MappingEditor
+                        source={source}
+                        allSources={allSources}
+                        portalTables={portalTables}
+                        value={mapping}
+                        onChange={(next) => onMappingChange(t.name, next)}
+                      />
+                    ) : null}
+                  </div>
+                );
+              })
+            )}
           </>
         );
       })()}
