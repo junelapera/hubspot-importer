@@ -2,7 +2,45 @@
 
 Running log of where the HubDB Importer project is, what's in flight, and what's next. Update as we go.
 
-## Current state — 2026-10-02 (afternoon)
+## Current state — 2026-10-08
+
+**First real end-to-end import (Prime Capital test workbook: 225 advisors + 78 locations, multi-value advisor FK, 302 images) surfaced a batch of importer bugs — all fixed.** Several were silent failures (job "succeeded", nothing written), so most fixes either correct the behavior or turn the silence into a dry-run error + synthesis issue that blocks execute. 291 vitest / 22 suites green, tsc + lint clean. Committed on branch `import-fixes-2026-10-08`.
+
+**Correctness bugs fixed:**
+- **Import order ignored FKs** (`lib/hubdb/import.ts`) — `importRows` built its dependency graph with `nodesFromTableInputs`, which reads `foreignTableName`; import schemas only ever set `foreignTable`. Every table was dependency-free, so tables ran in *upload order* — a referencing table listed first ran before its target and every row failed `missing-target-key-map`. Earlier runs only worked because sources happened to be uploaded target-first; the existing order test used the same lucky order. Now `schemaDependencyNodes` reads `foreignTable`; regression test lists the referencing table first. The `/import` "Import order" panel (`deriveImportOrder`) was always right — the executor disagreed with it
+- **Live vs draft schema** (`lib/hubdb/portal-schema.ts`) — `fetchPortalSchema` returned LIVE columns as `columns` (draft only in `draftColumns`), while every write targets the draft. A column re-created in the HubSpot UI (TEXT `Department` → SELECT `department`) only exists in the draft until publish, so mapping/dry run/execute mapped onto a column the draft no longer had → 400 `Column name 'Department' is invalid`. `columns` is now the draft set everywhere (also fixes provision PATCHes being built from live columns, which per F0-11 full-replace could drop draft-only columns); `liveColumns` kept for display
+- **Silent drops → explicit issues** (`lib/execution.ts`, `lib/dry-run.ts`): mapped FOREIGN_ID column with no FK config (`fk-not-configured` — was `if (!col.foreignTable) continue`), FK config on a non-FOREIGN_ID column (`fk-on-non-foreign-column` — typically a backwards canvas drag; skewed import order and dry run listed every row as unresolved), mapping onto a column the target no longer has (`target-column-missing`)
+- **Dry run** supports composite natural keys (was a hard error) and keys existing rows by *target* column names (was comparing source header names against HubDB names — only worked when identical)
+
+**Cell coercion — all verified against the live API with throwaway sandbox tables:**
+- IMAGE → `{url, type: "image"}` (bare URL → `INVALID_IMAGE_VARIANT_VALUE`)
+- SELECT → `{name, type: "option"}`, MULTISELECT → list of those (`lib/select-options.ts`). Bare strings, `{name}` without `type`, and string arrays all 400; unknown options 400 "Invalid option value". **Options created in the HubSpot UI have a slug `name` (`financial_wellness`) and a display `label` (`Financial Wellness`)** — sheets hold the label, cells must carry the name, so matching is label-then-name, case/whitespace-insensitive. Multi-select splits on `,` (Google Sheets' "allow multiple selections" writes `a, b`) or `;`, but a cell exactly matching one comma-containing label isn't split. Unknown options → row `type-mismatch` + dry-run warning listing the bad values
+
+**Images → HubSpot File Manager** (`lib/hubdb/files.ts`, `lib/image-uploads.ts`, Inngest steps `plan-images` → `find-existing-images` → `upload-images:N`):
+- Per IMAGE column, opt-out toggle (default on) + folder (default `/hubdb-importer/<table>`) in the mapping editor's new Images section, stored as `MappingState.imageUploads`. URLs copied via Files `import-from-url/async` + status polling, 25 per Inngest step at concurrency 4; HubDB stores the hubfs URL. Failures keep the original external URL and are listed on the results card. Missing `files` scope short-circuits with one clear message. Needs the private app's **`files.write`** scope
+- **HubSpot's import-from-url ignores `duplicateValidationStrategy`** — the same URL twice produced `x-1.jpg`, `x-2.jpg`, so every re-import would have duplicated every image. Fix: deterministic `name` per URL (case-preserving basename, collisions suffixed with an FNV hash) + `overwrite: true`, and list each destination folder once (`files/search?parentFolderIds=` — `name=` search returns nothing) to reuse existing files. `.jpeg` ↔ `.jpg` aliased (HubSpot normalizes it). Verified read-only against the portal: a re-run of the current data reuses all 302 images, uploads 0
+- **Files search silently ignores unknown filters** (`parentFolderPaths` returned unrelated portal files) — `listFolderFiles` path-checks every result. Don't trust a Files search filter without verifying the returned paths
+
+**Schema inference** (`lib/schema-infer.ts`): multi-value FK detection (split on `;` `|` `,`), FK match threshold relaxed from 100% to ≥90% with an unmatched count in the reason (real exports carry stale refs — 3 of ~180 here hid the whole relationship), `pagepath` / `path` added to NK name priority (was picking `City`). `toSchema` now emits snake_case HubDB column names (`Section 2 Content` → `section_2_content`, header kept as label; HubL needs `row.section_2_content`), renaming NK + FK `foreignColumn` refs with them; panel shows `→ name` under each header. `autoMap` folds all non-alphanumerics and also matches column labels. Existing tables provisioned with spaced names keep them (HubDB can't rename; we never drop)
+
+**UI:**
+- Jobs delete: per-row + bulk select on `/jobs`, button on `/jobs/[id]`, `DELETE /api/jobs` with `{ids}`. Running jobs are excluded in the DELETE itself (no check-then-delete race); queued ones send `import.execute.deleted`, which the function's `cancelOn` matches to drop the pending run, and preflight no-ops if the row is gone (covers the Inngest dev server being down at delete time)
+- Confirmation modals via shadcn `alert-dialog` (Base UI) for job delete, drop table (typed table name on production portals) and mapping-profile delete — no `window.confirm` / `prompt` left in the app
+- Mapping canvas orients FK drags by which end is mapped to a FOREIGN_ID column (flips backwards drags, refuses when neither is) — the drag direction wasn't discoverable and a backwards drag caused the dry-run noise above
+- Provision 502s now include HubSpot's message + body; target-table Select fixed to always-controlled (`?? ""`)
+
+**Operational notes:**
+- Local execution needs **both** `pnpm dev` and `pnpm dev:inngest` — without the latter, Execute fails with `enqueue failed: fetch failed`
+- A throwaway probe folder `/zz-hubdb-importer-probe` (3 copies of one headshot) is on the client portal; the token has no `files.delete` scope, so it needs a manual delete in the File Manager
+
+**Next up:**
+- Block execute (not just warn) when a source has duplicate natural keys — today both rows insert and the *next* import preflight-fails on the duplicates
+- Add Department-style dropdowns to inference (SELECT detection from a small distinct-value set) — currently always TEXT
+- Snake_case table names in inference (column names done; table names unchanged on purpose for now)
+
+---
+
+## Prior state — 2026-10-02 (afternoon)
 
 **Mapping canvas Phase A spiked.** The visual relationship editor from `docs/mapping-canvas.md` now exists as a working proof of concept behind a `[Form | Canvas]` toggle on `/import`. Builds on React Flow (`@xyflow/react@12.12.0`), reuses existing `MappingState` end-to-end — zero backend changes, zero migrations, same `importRows` / dry run / execute pipeline. Doc + Phase 3 checklist updated to reflect what landed vs. what's still open; the design-conversation history and Phase B/C scope stay in the doc for the next cycle.
 
