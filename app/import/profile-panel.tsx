@@ -1,7 +1,19 @@
 "use client";
 
 import { startTransition, useEffect, useRef, useState } from "react";
+import { Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogMedia,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import {
   Select,
   SelectContent,
@@ -245,11 +257,20 @@ export function ProfilePanel({
     }
   }
 
-  async function remove() {
+  // Profile awaiting confirmation in the delete modal; null when closed.
+  const [pendingDelete, setPendingDelete] = useState<Profile | null>(null);
+  const [deleting, setDeleting] = useState(false);
+
+  function askRemove() {
     if (status.kind !== "ready") return;
     const profile = status.profiles.find((p) => p.id === selected);
+    if (profile) setPendingDelete(profile);
+  }
+
+  async function remove() {
+    const profile = pendingDelete;
     if (!profile) return;
-    if (!confirm(`Delete profile "${profile.name}"?`)) return;
+    setDeleting(true);
     try {
       const res = await fetch(`/api/mappings/${profile.id}`, { method: "DELETE" });
       const body = (await res.json()) as { error?: string };
@@ -263,6 +284,9 @@ export function ProfilePanel({
       await reload();
     } catch (err) {
       setAction({ kind: "error", message: (err as Error).message });
+    } finally {
+      setDeleting(false);
+      setPendingDelete(null);
     }
   }
 
@@ -308,7 +332,7 @@ export function ProfilePanel({
             <Button variant="outline" size="sm" onClick={load} disabled={!selected}>
               Load
             </Button>
-            <Button variant="outline" size="sm" onClick={remove} disabled={!selected}>
+            <Button variant="outline" size="sm" onClick={askRemove} disabled={!selected}>
               Delete
             </Button>
           </div>
@@ -386,6 +410,29 @@ export function ProfilePanel({
           {action.message}
         </p>
       ) : null}
+      <AlertDialog
+        open={pendingDelete !== null}
+        onOpenChange={(open) => !open && !deleting && setPendingDelete(null)}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogMedia className="bg-destructive/10 text-destructive">
+              <Trash2 />
+            </AlertDialogMedia>
+            <AlertDialogTitle>Delete profile &ldquo;{pendingDelete?.name}&rdquo;?</AlertDialogTitle>
+            <AlertDialogDescription>
+              The saved column mappings, keys, and foreign-key settings are removed. Past jobs that used it
+              stay in job history; tables and rows in HubDB are not affected. This can&apos;t be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleting}>Cancel</AlertDialogCancel>
+            <AlertDialogAction variant="destructive" disabled={deleting} onClick={remove}>
+              {deleting ? "Deleting…" : "Delete profile"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </section>
   );
 }

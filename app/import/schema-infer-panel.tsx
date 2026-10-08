@@ -12,6 +12,7 @@ import {
 } from "@/components/ui/select";
 import {
   inferSchema,
+  columnNamesFor,
   toSchema,
   type InferredColumn,
   type InferredColumnType,
@@ -210,6 +211,7 @@ function TableSection({
               <ColumnRow
                 key={c.name}
                 column={c}
+                hubdbName={columnNamesFor(table.columns.map((x) => x.name)).get(c.name) ?? c.name}
                 naturalKey={table.naturalKey}
                 foreignChoices={foreignChoices.filter((t2) => t2.name !== table.name)}
                 onTypeChange={(type) =>
@@ -238,6 +240,7 @@ function TableSection({
 
 function ColumnRow({
   column,
+  hubdbName,
   naturalKey,
   foreignChoices,
   onTypeChange,
@@ -245,6 +248,7 @@ function ColumnRow({
   onToggleNaturalKey,
 }: {
   column: InferredColumn;
+  hubdbName: string;
   naturalKey: string | null;
   foreignChoices: readonly InferredTable[];
   onTypeChange: (type: InferredColumnType) => void;
@@ -255,7 +259,14 @@ function ColumnRow({
   const isNk = naturalKey === column.name;
   return (
     <tr className="border-t border-border align-top">
-      <td className="px-3 py-2 font-mono">{column.name}</td>
+      <td className="px-3 py-2">
+        <div>{column.name}</div>
+        {hubdbName !== column.name ? (
+          <div className="font-mono text-[10px] text-muted-foreground" title="HubDB column name (what HubL reads)">
+            → {hubdbName}
+          </div>
+        ) : null}
+      </td>
       <td className="px-3 py-2">
         <Select
           value={column.type}

@@ -8,7 +8,8 @@ import {
   type ForeignKeyConfig,
   type MappingState,
 } from "./mapping";
-import { normalizeKey, splitMultiValue, type NormalizeOptions } from "./resolve";
+import { composeCompositeKey, normalizeKey, splitMultiValue, type NormalizeOptions } from "./resolve";
+import { invalidOptionValues } from "./select-options";
 
 // F7 — dry run. Given mappings, source rows, portal tables, and existing
 // draft rows per target, project what an execute would do without writing
@@ -42,6 +43,8 @@ export interface DryRunCoercionWarning {
   targetColumn: string;
   targetType: string;
   badCount: number;
+  // SELECT / MULTISELECT: the offending values (deduped, capped).
+  examples?: string[];
 }
 
 export interface DryRunTableReport {
@@ -81,14 +84,12 @@ function buildSourceKeySet(
 
 function buildExistingKeySet(
   rows: ReadonlyArray<HubdbRow>,
-  naturalKey: string,
+  targetKeyCols: readonly string[],
   normOpts: NormalizeOptions,
 ): Set<string> {
   const set = new Set<string>();
   for (const row of rows) {
-    const raw = row.values[naturalKey];
-    if (raw === null || raw === undefined) continue;
-    const key = normalizeKey(raw, normOpts);
+    const key = composeCompositeKey(row.values, targetKeyCols, normOpts);
     if (key !== "") set.add(key);
   }
   return set;
@@ -138,10 +139,30 @@ function reportForSource(
   const errors: string[] = [];
   if (!target) errors.push(`no target table "${mapping.targetTableName}" on the portal`);
 
-  const naturalKeyCol = mapping.naturalKey[0] ?? null;
-  const naturalKeyIsComposite = mapping.naturalKey.length > 1;
-  if (mapping.naturalKey.length === 0) errors.push("no natural key selected");
-  if (naturalKeyIsComposite) errors.push("composite natural keys are unsupported in v1 dry-run");
+  // Natural key (single or composite) in both spaces: source rows are
+  // keyed by SOURCE column names, existing portal rows by TARGET names.
+  // Same composition as the importer (lib/resolve composeCompositeKey).
+  const sourceKeyCols = mapping.naturalKey;
+  const targetKeyCols: string[] = [];
+  if (sourceKeyCols.length === 0) errors.push("no natural key selected");
+  for (const col of sourceKeyCols) {
+    const a = mapping.columnMap[col];
+    if (a?.kind === "mapped") targetKeyCols.push(a.targetColumn);
+    else errors.push(`natural-key column "${col}" isn't mapped to a target column`);
+  }
+
+  if (target) {
+    for (const [sourceCol, assignment] of Object.entries(mapping.columnMap)) {
+      if (assignment.kind !== "mapped") continue;
+      if (findColumn(target.columns, assignment.targetColumn)?.type !== "FOREIGN_ID") continue;
+      const cfg = mapping.foreignKeys[sourceCol];
+      if (cfg?.sourceTable && cfg?.matchKey) continue;
+      errors.push(
+        `"${sourceCol}" → FOREIGN_ID column "${assignment.targetColumn}" has no foreign-key setup — ` +
+          "pick the source table and match key under Foreign key resolution, or the column won't be written",
+      );
+    }
+  }
 
   const normOpts: NormalizeOptions = { trim: true, collapseWhitespace: true, casefold: true };
 
@@ -149,17 +170,15 @@ function reportForSource(
   const unresolvedFks: DryRunUnresolvedFk[] = [];
   const coercionWarnings: DryRunCoercionWarning[] = [];
 
-  if (naturalKeyCol && !naturalKeyIsComposite && target && errors.length === 0) {
-    const existingKeys = buildExistingKeySet(existingRows, naturalKeyCol, normOpts);
+  if (sourceKeyCols.length > 0 && target && errors.length === 0) {
+    const existingKeys = buildExistingKeySet(existingRows, targetKeyCols, normOpts);
 
     for (let i = 0; i < source.rows.length; i++) {
-      const row = source.rows[i];
-      const rawKey = row[naturalKeyCol];
-      if (rawKey === undefined || String(rawKey).trim() === "") {
+      const key = composeCompositeKey(source.rows[i], sourceKeyCols, normOpts);
+      if (key === "") {
         planned.skipped++;
         continue;
       }
-      const key = normalizeKey(rawKey, normOpts);
       if (existingKeys.has(key)) planned.update++;
       else planned.create++;
     }
@@ -172,7 +191,31 @@ function reportForSource(
     for (const [sourceCol, assignment] of Object.entries(mapping.columnMap)) {
       if (assignment.kind !== "mapped") continue;
       const tc = findColumn(target.columns, assignment.targetColumn);
-      if (!tc) continue;
+      if (!tc) {
+        errors.push(
+          `"${sourceCol}" is mapped to column "${assignment.targetColumn}", which "${target.name}" no longer has ` +
+            "(deleted or re-created under a new name in HubSpot?) — re-pick the target column",
+        );
+        continue;
+      }
+      if (tc.type === "SELECT" || tc.type === "MULTISELECT") {
+        // Checked across every row, not a sample: one unknown option skips
+        // that row at execute time.
+        const values = source.rows.map((r) => String(r[sourceCol] ?? ""));
+        const bad = invalidOptionValues(values, String(tc.type), tc.options);
+        if (bad.length > 0) {
+          const badRows = values.filter((v) => invalidOptionValues([v], String(tc.type), tc.options).length > 0).length;
+          coercionWarnings.push({
+            sourceTable: source.name,
+            sourceColumn: sourceCol,
+            targetColumn: tc.name,
+            targetType: String(tc.type),
+            badCount: badRows,
+            examples: bad.slice(0, 10),
+          });
+        }
+        continue;
+      }
       const sample = sampleColumn(source.rows, sourceCol);
       const mismatch = detectTypeMismatch(sample, tc.type);
       if (mismatch) {
@@ -192,6 +235,19 @@ function reportForSource(
   for (const [sourceCol, cfgRaw] of Object.entries(mapping.foreignKeys)) {
     const cfg = cfgRaw as ForeignKeyConfig;
     if (!cfg.sourceTable || !cfg.matchKey) continue;
+    const assignment = mapping.columnMap[sourceCol];
+    const targetType =
+      target && assignment?.kind === "mapped"
+        ? findColumn(target.columns, assignment.targetColumn)?.type
+        : undefined;
+    if (target && assignment?.kind === "mapped" && targetType !== "FOREIGN_ID") {
+      errors.push(
+        `"${sourceCol}" has a foreign-key link to ${cfg.sourceTable}.${cfg.matchKey}, but its target column ` +
+          `"${assignment.targetColumn}" is ${targetType ?? "missing"}, not FOREIGN_ID — remove the link ` +
+          "(it's probably drawn backwards; links start from the column that holds the references)",
+      );
+      continue;
+    }
     const sibling = sourcesByName.get(cfg.sourceTable);
     if (!sibling) continue;
     const fkNormOpts = normalizeOptionsFor(cfg.matching);

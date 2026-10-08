@@ -9,7 +9,7 @@ type Stage =
   | { kind: "idle" }
   | { kind: "running" }
   | { kind: "error"; message: string }
-  | { kind: "done"; report: DryRunReport };
+  | { kind: "done"; report: DryRunReport; imageUploads: number };
 
 export function DryRunPanel({
   portalId,
@@ -34,6 +34,7 @@ export function DryRunPanel({
       });
       const body = (await res.json()) as {
         report?: DryRunReport;
+        imageUploads?: number;
         signature?: string;
         error?: string;
       };
@@ -41,7 +42,7 @@ export function DryRunPanel({
         setStage({ kind: "error", message: body.error ?? `HTTP ${res.status}` });
         return;
       }
-      setStage({ kind: "done", report: body.report });
+      setStage({ kind: "done", report: body.report, imageUploads: body.imageUploads ?? 0 });
       if (body.signature) onComplete?.(body.signature, body.report);
     } catch (err) {
       setStage({ kind: "error", message: (err as Error).message });
@@ -61,6 +62,9 @@ export function DryRunPanel({
           {stage.kind === "done" ? (
             <span className={"text-xs " + (stage.report.ok ? "text-emerald-700 dark:text-emerald-300" : "text-yellow-800 dark:text-yellow-200")}>
               {stage.report.ok ? "clean" : "needs review"} · {stage.report.projectedApiCalls} projected API call{stage.report.projectedApiCalls === 1 ? "" : "s"}
+              {stage.imageUploads > 0
+                ? ` · ${stage.imageUploads} image${stage.imageUploads === 1 ? "" : "s"} (ones already in the File Manager are reused)`
+                : ""}
             </span>
           ) : null}
           <Button onClick={run} disabled={stage.kind === "running"}>
@@ -146,7 +150,18 @@ function TableReport({ table }: { table: DryRunTableReport }) {
           {table.coercionWarnings.map((w, i) => (
             <li key={i} className="text-yellow-800 dark:text-yellow-200">
               <code className="rounded bg-muted px-1">{w.sourceColumn}</code> → <code className="rounded bg-muted px-1">{w.targetColumn}</code>{" "}
-              ({w.targetType}): {w.badCount} value(s) won&apos;t coerce cleanly
+              ({w.targetType}):{" "}
+              {w.examples ? (
+                <>
+                  {w.badCount} row(s) have values that aren&apos;t options on the column — those rows will be
+                  skipped. Add the option in HubDB or fix the cell:{" "}
+                  {w.examples.map((e) => (
+                    <code key={e} className="mr-1 rounded bg-muted px-1">{e}</code>
+                  ))}
+                </>
+              ) : (
+                <>{w.badCount} value(s) won&apos;t coerce cleanly</>
+              )}
             </li>
           ))}
         </ul>

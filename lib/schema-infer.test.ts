@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { inferSchema, toSchema, type InferInput } from "./schema-infer";
+import { columnNamesFor, hubdbColumnName, inferSchema, toSchema, type InferInput } from "./schema-infer";
 
 function table(name: string, rows: Record<string, string>[]): InferInput {
   return { name, rows, headers: Object.keys(rows[0] ?? {}) };
@@ -188,6 +188,35 @@ describe("inferSchema — FK detection", () => {
     expect(brandCol?.type).not.toBe("FOREIGN_ID");
   });
 
+  it("detects multi-value FK cells split on ';' and records the delimiter", () => {
+    const advisors = table("advisors", [{ slug: "a" }, { slug: "b" }, { slug: "c" }]);
+    const locations = table("locations", [
+      { code: "L1", team: "a; b" },
+      { code: "L2", team: "c" },
+    ]);
+    const col = inferSchema([advisors, locations])[1].columns.find((c) => c.name === "team");
+    expect(col).toMatchObject({ type: "FOREIGN_ID", foreignTable: "advisors", foreignColumn: "slug", multiDelimiter: ";" });
+  });
+
+  it("tolerates a few stale references (≥90% match) and reports the unmatched count", () => {
+    const advisors = table("advisors", Array.from({ length: 10 }, (_, i) => ({ slug: `a${i}` })));
+    const locations = table("locations", [
+      { code: "L1", team: "a0; a1; a2; a3; a4" },
+      { code: "L2", team: "a5; a6; a7; a8; a9; gone" },
+    ]);
+    const col = inferSchema([advisors, locations])[1].columns.find((c) => c.name === "team");
+    expect(col?.type).toBe("FOREIGN_ID");
+    expect(col?.reason).toContain("1 of 11 not found");
+  });
+
+  it("prefers a Page Path column as the natural key over other unique columns", () => {
+    const t = table("locations", [
+      { City: "Austin", "Page Path": "austin-tx" },
+      { City: "Boise", "Page Path": "boise-id" },
+    ]);
+    expect(inferSchema([t])[0].naturalKey).toBe("Page Path");
+  });
+
   it("case-insensitive match — 'Acme' resolves against 'acme'", () => {
     const brands = table("brands", [{ slug: "acme" }, { slug: "globex" }]);
     const products = table("products", [
@@ -228,6 +257,23 @@ describe("toSchema", () => {
     }
   });
 
+  it("names columns in HubDB snake_case, keeps the header as label, and renames NK + FK refs to match", () => {
+    const advisors = table("advisors", [{ "Page Path": "a" }, { "Page Path": "b" }]);
+    const locations = table("locations", [
+      { "Page Path": "x", "Section 2 Content": "hi", Advisors: "a; b" },
+      { "Page Path": "y", "Section 2 Content": "yo", Advisors: "b" },
+    ]);
+    const schema = toSchema(inferSchema([advisors, locations]));
+    const loc = schema.tables[1];
+    expect(loc.naturalKey).toBe("page_path");
+    expect(loc.columns.find((c) => c.name === "section_2_content")?.label).toBe("Section 2 Content");
+    expect(loc.columns.find((c) => c.name === "advisors")).toMatchObject({
+      type: "FOREIGN_ID",
+      foreignTable: "advisors",
+      foreignColumn: "page_path",
+    });
+  });
+
   it("carries FK metadata onto the schema shape", () => {
     const brands = table("brands", [{ slug: "acme" }, { slug: "globex" }]);
     const products = table("products", [
@@ -239,5 +285,24 @@ describe("toSchema", () => {
     expect(brandCol?.type).toBe("FOREIGN_ID");
     expect(brandCol?.foreignTable).toBe("brands");
     expect(brandCol?.foreignColumn).toBe("slug");
+  });
+});
+
+describe("hubdbColumnName", () => {
+  it("produces lowercase snake_case HubL-safe names", () => {
+    expect(hubdbColumnName("Section 2 Content")).toBe("section_2_content");
+    expect(hubdbColumnName("  Contact Us Link ")).toBe("contact_us_link");
+    expect(hubdbColumnName("Café Ñame®")).toBe("cafe_name");
+    expect(hubdbColumnName("2nd Line")).toBe("col_2nd_line");
+    expect(hubdbColumnName("hs_path")).toBe("col_hs_path");
+    expect(hubdbColumnName("®")).toBe("column");
+  });
+
+  it("dedupes names that collide after folding", () => {
+    expect([...columnNamesFor(["Page Path", "page-path", "Page_Path"]).values()]).toEqual([
+      "page_path",
+      "page_path_2",
+      "page_path_3",
+    ]);
   });
 });

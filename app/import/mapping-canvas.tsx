@@ -147,9 +147,6 @@ export function MappingCanvas(props: {
 
 function MappingCanvasInner({
   allSources,
-  // portalTables kept for the follow-up spike (rendering target tables as
-  // separate nodes). Current source-only view doesn't consume it.
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   portalTables,
   mappings,
   onMappingChange,
@@ -208,9 +205,46 @@ function MappingCanvasInner({
     return result;
   }, [mappings]);
 
+  const [connectNotice, setConnectNotice] = useState<string | null>(null);
+
+  // Is this source column mapped onto a FOREIGN_ID target column? Only
+  // those columns hold references, so only they can own an FK config.
+  const isFkColumn = useCallback(
+    (sourceName: string, col: string) => {
+      const mapping = mappings[sourceName];
+      const a = mapping?.columnMap[col];
+      if (a?.kind !== "mapped" || !mapping.targetTableName) return false;
+      const target = portalTables.find((t) => t.name === mapping.targetTableName);
+      return target?.columns.some((c) => c.name === a.targetColumn && c.type === "FOREIGN_ID") ?? false;
+    },
+    [mappings, portalTables],
+  );
+
   const onConnect = useCallback(
-    (params: Connection) => {
-      if (!params.source || !params.target || !params.sourceHandle || !params.targetHandle) return;
+    (raw: Connection) => {
+      if (!raw.source || !raw.target || !raw.sourceHandle || !raw.targetHandle) return;
+      // The FK lives on the column holding the references. Users drag
+      // either way, so orient the edge by which end is the FOREIGN_ID
+      // column; refuse when neither is (nothing would get written).
+      const fromFk = isFkColumn(raw.source, raw.sourceHandle);
+      const toFk = isFkColumn(raw.target, raw.targetHandle);
+      if (!fromFk && !toFk) {
+        setConnectNotice(
+          `Neither "${raw.source}.${raw.sourceHandle}" nor "${raw.target}.${raw.targetHandle}" is mapped to a ` +
+            "FOREIGN_ID column. Map the column that holds the references to a FOREIGN_ID column first, then connect it " +
+            "to the column it matches (e.g. Locations.Advisors → Advisors.Page Path).",
+        );
+        return;
+      }
+      const params =
+        !fromFk && toFk
+          ? { source: raw.target, sourceHandle: raw.targetHandle, target: raw.source, targetHandle: raw.sourceHandle }
+          : { source: raw.source, sourceHandle: raw.sourceHandle, target: raw.target, targetHandle: raw.targetHandle };
+      setConnectNotice(
+        !fromFk && toFk
+          ? `Connected ${params.source}.${params.sourceHandle} → ${params.target}.${params.targetHandle} (reversed to start from the FOREIGN_ID column).`
+          : null,
+      );
       const existing = mappings[params.source] ?? initialMappingState();
       const prevFk = existing.foreignKeys[params.sourceHandle];
       const nextFk: ForeignKeyConfig = prevFk
@@ -231,7 +265,7 @@ function MappingCanvasInner({
         },
       });
     },
-    [mappings, onMappingChange],
+    [mappings, onMappingChange, isFkColumn],
   );
 
   const deleteEdges = useCallback(
@@ -297,7 +331,7 @@ function MappingCanvasInner({
     <div className="space-y-2">
       <div className="flex items-center justify-between gap-3">
         <p className="text-[11px] text-muted-foreground">
-          Drag a card to move it · drag between column dots to create an FK ·{" "}
+          Drag a card to move it · drag from a FOREIGN_ID column to the column it matches to create an FK ·{" "}
           <strong>double-click</strong> a connection to delete it (or select it and press{" "}
           <kbd className="rounded border border-border bg-muted px-1 py-0.5 text-[10px]">Delete</kbd>)
         </p>
@@ -322,6 +356,11 @@ function MappingCanvasInner({
           )}
         </Button>
       </div>
+      {connectNotice ? (
+        <p className="rounded-md border border-yellow-500/30 bg-yellow-500/5 p-2 text-xs text-yellow-800 dark:text-yellow-200">
+          {connectNotice}
+        </p>
+      ) : null}
       <div
         ref={containerRef}
         className={

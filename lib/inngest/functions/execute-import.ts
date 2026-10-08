@@ -10,7 +10,11 @@ import {
   ImportPreflightError,
   type ImportEvent,
   type ImportResult,
+  type UploadImagesResult,
+  listFolderFiles,
+  uploadImages,
 } from "@/lib/hubdb";
+import { applyImageUrlMap, matchExistingFiles, planImageUploads } from "@/lib/image-uploads";
 import { synthesizeExecution } from "@/lib/execution";
 import { createSupabaseServerClient } from "@/lib/db/supabase";
 import { getPortalById, getPortalToken } from "@/lib/db/portals";
@@ -29,6 +33,10 @@ import {
 import { recordBatchComplete, recordBatchStart } from "@/lib/db/job-batches";
 import { upsertKeyMap } from "@/lib/db/key-maps";
 import { inngest } from "@/lib/inngest/client";
+
+// Images per upload step. Each upload is a queued import + status polls
+// (~1-3s); 25 at concurrency 4 stays well inside the per-step time cap.
+const IMAGE_UPLOAD_CHUNK = 25;
 
 // Runs the whole import out-of-band. The API route enqueues one
 // "import.execute.requested" event; this function does the work with
@@ -53,6 +61,9 @@ export const executeImport = inngest.createFunction(
     // inside and finalizes the job cleanly — those don't retry.
     retries: 2,
     triggers: [{ event: "import.execute.requested" }],
+    // DELETE /api/jobs sends this for jobs deleted while still queued, so
+    // a pending run is dropped before it touches HubDB.
+    cancelOn: [{ event: "import.execute.deleted", match: "data.jobId" }],
   },
   async ({ event, step }) => {
     const { jobId } = event.data as { jobId: string };
@@ -62,7 +73,9 @@ export const executeImport = inngest.createFunction(
     const preflight = await step.run("preflight", async () => {
       const supabase = createSupabaseServerClient();
       const job = await getJobById(supabase, jobId);
-      if (!job) throw new Error(`job ${jobId} not found`);
+      // Deleted while queued (the cancelOn event may not have landed, e.g.
+      // Inngest dev server was down at delete time) — nothing to run.
+      if (!job) return null;
       if (!job.portalId) throw new Error(`job ${jobId} has no portal_id`);
       if (!job.inputSources) throw new Error(`job ${jobId} has no input_sources`);
       if (!job.inputMappings) throw new Error(`job ${jobId} has no input_mappings`);
@@ -72,7 +85,7 @@ export const executeImport = inngest.createFunction(
       const token = await getPortalToken(supabase, job.portalId);
       if (!token) throw new Error(`portal ${job.portalId} token missing`);
 
-      await markJobRunning(supabase, jobId);
+      if (!(await markJobRunning(supabase, jobId))) return null;
 
       return {
         portalId: job.portalId,
@@ -81,12 +94,75 @@ export const executeImport = inngest.createFunction(
         publish: (job.inputPublish ?? "none") as "none" | "foreign-only" | "all",
       };
     });
+    if (!preflight) return { jobId, skipped: "job deleted before it started" };
 
     // The importRows step + all publish steps below all need a fresh
     // Supabase + HubDB client (function-local — no closure over the
     // preflight step). We rebuild them inside each step's callback.
 
-    // ─── Step 2: import-rows ───────────────────────────────────────
+    // ─── Step 2: upload images ─────────────────────────────────────
+    // IMAGE columns with "Upload to File Manager" on get their external
+    // URLs copied into HubSpot first, so HubDB stores hubfs links. One
+    // step per chunk: a retry re-runs only that chunk, and completed
+    // chunks are memoized across later step failures. A failed upload
+    // keeps the original URL (reported in response.images).
+    const imageTasks = await step.run("plan-images", async () => {
+      const supabase = createSupabaseServerClient();
+      const job = await getJobById(supabase, jobId);
+      if (!job) throw new Error(`job ${jobId} disappeared`);
+      const token = await getPortalToken(supabase, preflight.portalId);
+      if (!token) throw new Error(`portal token missing`);
+      const snapshot = await fetchPortalSchema(createHubdbClient({ token }));
+      const synth = synthesizeExecution({
+        sources: job.inputSources!,
+        mappings: job.inputMappings!,
+        portalTables: snapshot.tables,
+      });
+      // Synthesis problems are reported by import-rows; nothing to upload.
+      if (!synth.schema || synth.issues.length > 0) return [];
+      return planImageUploads(synth.source, synth.imageColumns);
+    });
+
+    // Reuse files already in their destination folder (previous import of
+    // the same images). One listing per folder, not per image.
+    const existingImages = await step.run("find-existing-images", async () => {
+      if (imageTasks.length === 0) return { found: {}, remaining: [] };
+      const supabase = createSupabaseServerClient();
+      const token = await getPortalToken(supabase, preflight.portalId);
+      if (!token) throw new Error(`portal token missing`);
+      const client = createHubdbClient({ token });
+      const folders = [...new Set(imageTasks.map((t) => t.folderPath))];
+      const listed = await Promise.all(folders.map(async (f) => [f, await listFolderFiles(client, f)] as const));
+      return matchExistingFiles(imageTasks, Object.fromEntries(listed));
+    });
+    const toUpload = existingImages.remaining;
+
+    const images: UploadImagesResult = { uploaded: { ...existingImages.found }, failures: [] };
+    for (let i = 0; i < toUpload.length; i += IMAGE_UPLOAD_CHUNK) {
+      const chunk = toUpload.slice(i, i + IMAGE_UPLOAD_CHUNK);
+      const r = await step.run(`upload-images:${i / IMAGE_UPLOAD_CHUNK}`, async () => {
+        const supabase = createSupabaseServerClient();
+        if (await isCancelRequested(supabase, jobId)) return null;
+        const token = await getPortalToken(supabase, preflight.portalId);
+        if (!token) throw new Error(`portal token missing`);
+        return uploadImages(createHubdbClient({ token }), chunk);
+      });
+      // Cancelled — import-rows sees the same flag and stops at its first batch.
+      if (!r) break;
+      Object.assign(images.uploaded, r.uploaded);
+      images.failures.push(...r.failures);
+      // Missing `files` scope fails every chunk the same way — don't
+      // burn a step per chunk proving it.
+      const scopeFailure = r.failures.find((f) => f.error.includes("`files` scope"));
+      if (scopeFailure) {
+        for (const t of toUpload.slice(i + IMAGE_UPLOAD_CHUNK)) {
+          images.failures.push({ url: t.url, folderPath: t.folderPath, error: scopeFailure.error });
+        }
+        break;
+      }
+    }
+
+    // ─── Step 3: import-rows ───────────────────────────────────────
     // The long one. Runs the whole importRows synchronously inside a
     // single step — durability comes from Inngest's automatic retry on
     // step failure / timeout. Upserts are idempotent by natural key,
@@ -180,7 +256,7 @@ export const executeImport = inngest.createFunction(
           {
             schema: synth.schema,
             tableIds: synth.tableIds,
-            source: synth.source,
+            source: applyImageUrlMap(synth.source, synth.imageColumns, images.uploaded),
             fkOptions: synth.fkOptions,
           },
           {
@@ -261,7 +337,7 @@ export const executeImport = inngest.createFunction(
       }
     });
 
-    // ─── Step 3: publish (per table, only on ok import) ────────────
+    // ─── Step 4: publish (per table, only on ok import) ────────────
     // Publish list mirrors the current synchronous route: "foreign-only"
     // publishes everything except the last table in dependency order.
     const published: PublishedEntry[] = [];
@@ -302,7 +378,7 @@ export const executeImport = inngest.createFunction(
       }
     }
 
-    // ─── Step 4: finalize ──────────────────────────────────────────
+    // ─── Step 5: finalize ──────────────────────────────────────────
     // One consolidated write: status + totals + response payload + row
     // errors. Idempotent — Inngest retry of finalize is safe.
     await step.run("finalize", async () => {
@@ -347,6 +423,15 @@ export const executeImport = inngest.createFunction(
                       ? importOutput.hubspot
                       : undefined,
                 };
+
+      if (imageTasks.length > 0) {
+        const reused = Object.keys(existingImages.found).length;
+        response.images = {
+          uploaded: Object.keys(images.uploaded).length - reused,
+          reused,
+          failed: images.failures,
+        };
+      }
 
       await setJobResponse(supabase, jobId, response);
 

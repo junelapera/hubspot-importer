@@ -2,6 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { ImportEvent, ImportResult, RowError } from "../hubdb";
 import type { MappingState } from "../mapping";
 import type { ExecutionSourceInput } from "../execution";
+import type { ImageUploadFailure } from "../image-uploads";
 
 export type JobKind = "dry_run" | "import" | "publish";
 export type JobStatus = "queued" | "pending" | "running" | "succeeded" | "failed" | "cancelled";
@@ -19,6 +20,9 @@ export type JobResponsePayload = {
   hubspot?: { status: number; path: string; method: string; body?: unknown };
   row?: RowError;
   fail?: { kind: "fail-fast" | "cancelled"; message: string };
+  // Present when any IMAGE column was set to upload. Failed uploads kept
+  // their original external URL in HubDB.
+  images?: { uploaded: number; reused?: number; failed: ImageUploadFailure[] };
 };
 
 /**
@@ -168,16 +172,41 @@ export async function createJob(
 }
 
 // Called from the Inngest preflight step to mark the job as running (it
-// was queued when the API route enqueued it).
+// was queued when the API route enqueued it). Returns false when the row
+// is gone — the job was deleted while queued, so the run should no-op.
 export async function markJobRunning(
   client: SupabaseClient,
   id: string,
-): Promise<void> {
-  const { error } = await client
+): Promise<boolean> {
+  const { data, error } = await client
     .from("jobs")
     .update({ status: "running", started_at: new Date().toISOString() })
-    .eq("id", id);
+    .eq("id", id)
+    .select("id");
   if (error) throw new Error(`jobs.markRunning failed: ${error.message}`);
+  return (data ?? []).length > 0;
+}
+
+// Delete jobs by id. Running jobs are never deleted — the Inngest step
+// would keep writing to HubDB with nowhere to record progress — so the
+// status filter lives in the DELETE itself (no check-then-delete race
+// with the preflight step flipping queued → running). job_batches /
+// job_errors / key_maps cascade. Returns the rows that were actually
+// deleted with their pre-delete status, so callers can cancel any
+// pending Inngest run for jobs that were still queued.
+export async function deleteJobs(
+  client: SupabaseClient,
+  ids: readonly string[],
+): Promise<{ id: string; status: JobStatus }[]> {
+  if (ids.length === 0) return [];
+  const { data, error } = await client
+    .from("jobs")
+    .delete()
+    .in("id", ids as string[])
+    .neq("status", "running")
+    .select("id, status");
+  if (error) throw new Error(`jobs.delete failed: ${error.message}`);
+  return (data ?? []) as { id: string; status: JobStatus }[];
 }
 
 // Reset a job row to "queued" so the Inngest handler can re-run it.

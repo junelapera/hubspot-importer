@@ -209,3 +209,115 @@ describe("computeDryRun — coercion + API count + ordering", () => {
     expect(report.projectedApiCalls).toBe(4);
   });
 });
+
+describe("computeDryRun — unconfigured FK", () => {
+  it("errors when a mapped FOREIGN_ID column has no sibling source / match key", () => {
+    const locations = table("locations", "T2", [
+      { name: "slug", type: "TEXT" },
+      { name: "advisors", type: "FOREIGN_ID", foreignTableId: "T1" },
+    ]);
+    const mapping: MappingState = {
+      ...initialMappingState(),
+      targetTableName: "locations",
+      columnMap: {
+        slug: { kind: "mapped", targetColumn: "slug" },
+        "Cleaned Advisors": { kind: "mapped", targetColumn: "advisors" },
+      },
+      naturalKey: ["slug"],
+      foreignKeys: { "Cleaned Advisors": { ...initialForeignKeyConfig() } },
+    };
+    const report = computeDryRun({
+      sources: [{ name: "locations", headers: ["slug", "Cleaned Advisors"], rows: [{ slug: "a", "Cleaned Advisors": "x" }] }],
+      mappings: { locations: mapping },
+      portalTables: [locations],
+      existingRowsByTarget: {},
+    });
+    expect(report.ok).toBe(false);
+    expect(report.tables[0]?.errors[0]).toContain("no foreign-key setup");
+  });
+});
+
+describe("computeDryRun — FK on a non-FOREIGN_ID column", () => {
+  it("errors instead of listing every row as unresolved", () => {
+    const advisors = table("advisors", "T1", [{ name: "slug", type: "TEXT" }]);
+    const mapping: MappingState = {
+      ...initialMappingState(),
+      targetTableName: "advisors",
+      columnMap: { slug: { kind: "mapped", targetColumn: "slug" } },
+      naturalKey: ["slug"],
+      foreignKeys: { slug: { ...initialForeignKeyConfig(), sourceTable: "locations", matchKey: "team" } },
+    };
+    const report = computeDryRun({
+      sources: [
+        { name: "advisors", headers: ["slug"], rows: [{ slug: "a" }] },
+        { name: "locations", headers: ["team"], rows: [{ team: "a; b" }] },
+      ],
+      mappings: { advisors: mapping },
+      portalTables: [advisors],
+      existingRowsByTarget: {},
+    });
+    const t = report.tables.find((x) => x.sourceName === "advisors");
+    expect(t?.unresolvedFks).toEqual([]);
+    expect(t?.errors[0]).toContain("not FOREIGN_ID");
+  });
+});
+
+describe("computeDryRun — composite natural key", () => {
+  it("plans create/update on the combined key and matches existing rows by target column names", () => {
+    const people = table("people", "T1", [{ name: "first", type: "TEXT" }, { name: "last", type: "TEXT" }]);
+    const mapping: MappingState = {
+      ...initialMappingState(),
+      targetTableName: "people",
+      columnMap: {
+        First: { kind: "mapped", targetColumn: "first" },
+        Last: { kind: "mapped", targetColumn: "last" },
+      },
+      naturalKey: ["First", "Last"],
+    };
+    const report = computeDryRun({
+      sources: [{ name: "people", headers: ["First", "Last"], rows: [
+        { First: "Ada", Last: "Lovelace" }, // existing → update
+        { First: "Ada", Last: "Byron" },    // same first, different last → create
+        { First: "Alan", Last: "" },        // incomplete key → skipped
+      ] }],
+      mappings: { people: mapping },
+      portalTables: [people],
+      existingRowsByTarget: { people: [existingRow("r1", { first: "ada", last: "LOVELACE" })] },
+    });
+    expect(report.tables[0]?.errors).toEqual([]);
+    expect(report.tables[0]?.planned).toEqual({ create: 1, update: 1, skipped: 1 });
+  });
+});
+
+describe("computeDryRun — dropdown options", () => {
+  it("warns with the values that aren't options on SELECT / MULTISELECT columns", () => {
+    const options = [{ id: "1", name: "Red", type: "option" }, { id: "2", name: "Blue", type: "option" }];
+    const items = {
+      ...table("items", "T1", [{ name: "k", type: "TEXT" }, { name: "color", type: "SELECT" }, { name: "tags", type: "MULTISELECT" }]),
+    };
+    items.columns = items.columns.map((c) => (c.type === "TEXT" ? c : { ...c, options }));
+    const mapping: MappingState = {
+      ...initialMappingState(),
+      targetTableName: "items",
+      columnMap: {
+        k: { kind: "mapped", targetColumn: "k" },
+        Color: { kind: "mapped", targetColumn: "color" },
+        Tags: { kind: "mapped", targetColumn: "tags" },
+      },
+      naturalKey: ["k"],
+    };
+    const report = computeDryRun({
+      sources: [{ name: "items", headers: ["k", "Color", "Tags"], rows: [
+        { k: "a", Color: "red", Tags: "Red, Blue" },
+        { k: "b", Color: "Green", Tags: "Red, Teal" },
+        { k: "c", Color: "green", Tags: "" },
+      ] }],
+      mappings: { items: mapping },
+      portalTables: [items],
+      existingRowsByTarget: {},
+    });
+    const warnings = report.tables[0]?.coercionWarnings ?? [];
+    expect(warnings.find((w) => w.targetColumn === "color")).toMatchObject({ badCount: 2, examples: ["Green", "green"] });
+    expect(warnings.find((w) => w.targetColumn === "tags")).toMatchObject({ badCount: 1, examples: ["Teal"] });
+  });
+});

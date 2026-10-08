@@ -45,6 +45,9 @@ describe("fetchPortalSchema", () => {
     );
     expect(snapshot.tables).toHaveLength(1);
     expect(snapshot.tables[0]?.draftColumns.map((c) => c.name)).toEqual(["slug", "name"]);
+    // Writes target the draft, so `columns` must be the draft set too.
+    expect(snapshot.tables[0]?.columns.map((c) => c.name)).toEqual(["slug", "name"]);
+    expect(snapshot.tables[0]?.liveColumns.map((c) => c.name)).toEqual(["slug"]);
     expect(snapshot.tables[0]?.rowCount).toBe(3);
     expect(snapshot.fetchedAt).toBe("2026-09-17T00:00:00Z");
   });

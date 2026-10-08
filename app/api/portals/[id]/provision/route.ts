@@ -5,6 +5,7 @@ import { createSupabaseServerClient } from "@/lib/db/supabase";
 import {
   createHubdbClient,
   fetchPortalSchema,
+  HubdbError,
   opsFromClient,
   provision,
   ProvisionConflictError,
@@ -59,6 +60,7 @@ export async function POST(
   try {
     snapshot = await fetchPortalSchema(client);
   } catch (err) {
+    console.error("[provision] introspection failed", err);
     return errorResponse(502, `HubSpot introspection failed: ${(err as Error).message}`);
   }
 
@@ -82,9 +84,16 @@ export async function POST(
         plan,
       });
     }
-    return errorResponse(502, `provisioning failed: ${(err as Error).message}`, {
+    console.error("[provision] failed", err, { events });
+    const hubspot = err instanceof HubdbError ? err.responseBody : undefined;
+    const detail =
+      hubspot && typeof hubspot === "object" && "message" in hubspot
+        ? ` — ${String((hubspot as { message: unknown }).message)}`
+        : "";
+    return errorResponse(502, `provisioning failed: ${(err as Error).message}${detail}`, {
       plan,
       events,
+      hubspot,
     });
   }
 }

@@ -124,6 +124,116 @@ describe("importRows", () => {
     ]);
   });
 
+  it("wraps IMAGE cells as {url, type: 'image'} and rejects non-URL values", async () => {
+    const schema = parseSchema({
+      version: 1,
+      tables: [
+        {
+          name: "people",
+          label: "People",
+          naturalKey: "slug",
+          columns: [
+            { name: "slug", type: "TEXT" },
+            { name: "photo", type: "IMAGE" },
+          ],
+        },
+      ],
+    });
+    const ops = fakeOps();
+    const result = await importRows(ops, {
+      schema,
+      tableIds: { people: "30" },
+      source: {
+        people: [
+          { slug: "a", photo: " https://example.com/a.jpg " },
+          { slug: "b", photo: "" },
+          { slug: "c", photo: "a.jpg" },
+        ],
+      },
+    });
+    const create = ops.calls.find((c) => c.op === "create");
+    if (!create || create.op !== "create") throw new Error("expected create call");
+    expect(create.rows.map((r) => r.values)).toEqual([
+      { slug: "a", photo: { url: "https://example.com/a.jpg", type: "image" } },
+      { slug: "b" },
+    ]);
+    expect(result.tables[0].errors).toMatchObject([{ table: "people", kind: "type-mismatch" }]);
+  });
+
+  it("orders by FK dependency even when the referencing table is listed first", async () => {
+    const reversed = parseSchema({
+      version: 1,
+      tables: [...brandsProducts.tables].reverse(),
+    });
+    expect(reversed.tables[0].name).toBe("products");
+    const ops = fakeOps();
+    const result = await importRows(ops, {
+      schema: reversed,
+      tableIds,
+      source: {
+        products: [{ sku: "P1", title: "Widget", brand: "brand-a" }],
+        brands: [{ name: "Alpha", slug: "brand-a" }],
+      },
+    });
+    expect(result.order).toEqual(["brands", "products"]);
+    expect(result.ok).toBe(true);
+    const productCreate = ops.calls.find((c) => c.op === "create" && c.ref === tableIds.products);
+    if (!productCreate || productCreate.op !== "create") throw new Error("expected products create");
+    expect(productCreate.rows[0].values.brand).toEqual([{ id: "1000", type: "foreignid" }]);
+  });
+
+  it("sends SELECT / MULTISELECT cells as HubDB option objects and skips rows with unknown options", async () => {
+    const options = [
+      { id: "1", name: "Red", type: "option" },
+      { id: "2", name: "Blue", type: "option" },
+    ];
+    const schema = parseSchema({
+      version: 1,
+      tables: [
+        {
+          name: "items",
+          label: "Items",
+          naturalKey: "k",
+          columns: [
+            { name: "k", type: "TEXT" },
+            { name: "color", type: "SELECT", options },
+            { name: "tags", type: "MULTISELECT", options },
+          ],
+        },
+      ],
+    });
+    const ops = fakeOps();
+    const result = await importRows(ops, {
+      schema,
+      tableIds: { items: "40" },
+      source: {
+        items: [
+          { k: "a", color: " red ", tags: "Red, blue" },
+          { k: "b", color: "", tags: "" },
+          { k: "c", color: "Green", tags: "Red" },
+          { k: "d", color: "Blue", tags: "Red; Teal" },
+        ],
+      },
+    });
+    const create = ops.calls.find((c) => c.op === "create");
+    if (!create || create.op !== "create") throw new Error("expected create call");
+    expect(create.rows.map((r) => r.values)).toEqual([
+      {
+        k: "a",
+        color: { name: "Red", type: "option" },
+        tags: [
+          { name: "Red", type: "option" },
+          { name: "Blue", type: "option" },
+        ],
+      },
+      { k: "b" },
+    ]);
+    expect(result.tables[0].errors.map((e) => [e.sourceIndex, e.kind, e.column])).toEqual([
+      [2, "type-mismatch", "color"],
+      [3, "type-mismatch", "tags"],
+    ]);
+  });
+
   it("PATCH-updates rows whose natural key matches an existing row", async () => {
     const ops = fakeOps({
       "10": [

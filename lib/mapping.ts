@@ -5,8 +5,15 @@ import { DEFAULT_NORMALIZE, normalizeKey, splitMultiValue, type Delimiter, type 
 // Identifier normalization for auto-match (source header ↔ target column
 // name). Distinct from `normalizeKey` in resolve.ts (which is for cell
 // values). Strips separators entirely rather than collapsing to spaces.
+// Folds everything but letters and digits so a sheet header matches the
+// HubDB name/label it was provisioned as: "Section 2 Content",
+// "section_2_content", and "Contact #" → "contact" all line up.
 export function normalizeIdent(raw: string): string {
-  return raw.toLowerCase().replace(/[\s_\-.]+/g, "");
+  return raw
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "");
 }
 
 export type ColumnAssignment =
@@ -17,8 +24,15 @@ export type ColumnAssignment =
 export type ColumnMap = Record<string, ColumnAssignment>;
 
 export function autoMap(sourceHeaders: readonly string[], targetColumns: readonly HubdbColumn[]): ColumnMap {
+  // Match on the column name, then its label (a header like "Contact #"
+  // only survives intact in the label).
   const byNorm = new Map<string, string>();
   for (const c of targetColumns) byNorm.set(normalizeIdent(c.name), c.name);
+  for (const c of targetColumns) {
+    if (!c.label) continue;
+    const n = normalizeIdent(c.label);
+    if (!byNorm.has(n)) byNorm.set(n, c.name);
+  }
 
   const claimed = new Set<string>();
   const map: ColumnMap = {};
@@ -103,6 +117,26 @@ export interface ForeignKeyConfig {
   matching: FkMatching;
 }
 
+// Per IMAGE column: copy the source URL into the HubSpot File Manager and
+// write the hubfs URL into HubDB instead of the external link. Opt-out —
+// a column with no entry uploads into `defaultImageFolder(target)`.
+export interface ImageUploadConfig {
+  enabled: boolean;
+  folderPath: string;
+}
+
+export function defaultImageFolder(targetTableName: string | null): string {
+  return `/hubdb-importer/${targetTableName ?? "images"}`;
+}
+
+export function resolveImageUpload(mapping: MappingState, sourceCol: string): ImageUploadConfig {
+  const cfg = mapping.imageUploads?.[sourceCol];
+  return {
+    enabled: cfg?.enabled ?? true,
+    folderPath: cfg?.folderPath?.trim() || defaultImageFolder(mapping.targetTableName),
+  };
+}
+
 export interface MappingState {
   targetTableName: string | null;
   // Portal id of the resolved target. Cached at target-picker time so a
@@ -115,6 +149,9 @@ export interface MappingState {
   hsName: string | null;
   hsPath: string | null;
   foreignKeys: Record<string, ForeignKeyConfig>;
+  // Keyed by SOURCE column. Optional so profiles saved before image
+  // uploads existed load unchanged (and default to uploading).
+  imageUploads?: Record<string, ImageUploadConfig>;
 }
 
 export function initialMappingState(): MappingState {

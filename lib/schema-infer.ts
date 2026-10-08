@@ -26,6 +26,10 @@ export type InferredColumn = {
   type: InferredColumnType;
   foreignTable?: string;
   foreignColumn?: string;
+  // Set when the FK only matched after splitting cells on this delimiter
+  // (e.g. "a; b; c"). The schema has no multi flag — the mapping's FK
+  // panel needs Multi on with this delimiter.
+  multiDelimiter?: string;
   isNaturalKey?: boolean;
   reason?: string;
 };
@@ -56,6 +60,29 @@ const BOOL_FALSE = new Set(["false", "0", "no", "n", "f"]);
 const CURRENCY_HINT = /(?:price|cost|amount|total|revenue|salary|fee|rate)/i;
 const RICHTEXT_THRESHOLD = 500;
 const NK_MIN_FILL_RATIO = 0.5;
+// Delimiters tried (in order) for multi-value FK detection. Matches the
+// mapping editor's Delimiter options minus newline.
+const MULTI_DELIMITERS = [";", "|", ","] as const;
+// Share of values (tokens, for multi-value cells) that must exist in the
+// other table's naturalKey before a column is guessed as FOREIGN_ID.
+// Not 100%: real exports usually carry a few stale references, and
+// missing one link shouldn't hide the whole relationship.
+const FK_MIN_MATCH_RATIO = 0.9;
+
+function matchRatio(
+  cells: readonly string[][],
+  set: ReadonlySet<string>,
+): { ratio: number; unmatched: number; total: number } {
+  let total = 0;
+  let unmatched = 0;
+  for (const tokens of cells) {
+    for (const t of tokens) {
+      total++;
+      if (!set.has(t)) unmatched++;
+    }
+  }
+  return { ratio: total === 0 ? 0 : (total - unmatched) / total, unmatched, total };
+}
 // Prefer columns with these names for the naturalKey pick when several
 // columns are unique. Earlier entries win. Match is case-insensitive on
 // normalized column name (lowercased, separators stripped).
@@ -64,6 +91,8 @@ const NK_NAME_PRIORITY = [
   "uuid",
   "sku",
   "slug",
+  "pagepath",
+  "path",
   "handle",
   "code",
   "key",
@@ -80,9 +109,9 @@ export function inferSchema(
   // every table's chosen naturalKey column, so it runs as a second pass.
   const firstPass = inputs.map((t) => inferOneTable(t, sampleSize));
 
-  // Pass 2: FK — for each column, check if its non-empty values are a
-  // subset of another table's naturalKey column values. All-or-nothing;
-  // any unmatched value disqualifies the FK guess.
+  // Pass 2: FK — for each column, check whether its non-empty values (or
+  // their delimiter-split tokens) are found in another table's naturalKey
+  // column. At least FK_MIN_MATCH_RATIO must match.
   const tablesByName = new Map<string, InferredTable>();
   for (const t of firstPass) tablesByName.set(t.name, t);
   const nkValuesByTable = new Map<string, { column: string; set: Set<string> }>();
@@ -109,12 +138,27 @@ export function inferSchema(
       if (values.length === 0) continue;
       for (const [otherName, otherNk] of nkValuesByTable) {
         if (otherName === table.name) continue;
-        const allMatch = values.every((v) => otherNk.set.has(v));
-        if (!allMatch) continue;
+        // Multi-value cells ("a; b; c") are split on the first delimiter
+        // that actually appears, so a plain single-value column never gets
+        // flagged multi. Exact single-value matches are tried first.
+        const single = matchRatio(values.map((v) => [v]), otherNk.set);
+        const delimiter = MULTI_DELIMITERS.find((d) => values.some((v) => v.includes(d)));
+        const multi = delimiter
+          ? matchRatio(values.map((v) => v.split(delimiter).map((t) => t.trim()).filter(Boolean)), otherNk.set)
+          : null;
+        const best = single.ratio >= FK_MIN_MATCH_RATIO ? single : multi && multi.ratio >= FK_MIN_MATCH_RATIO ? multi : null;
+        if (!best) continue;
         col.type = "FOREIGN_ID";
         col.foreignTable = otherName;
         col.foreignColumn = otherNk.column;
-        col.reason = `every value found in ${otherName}.${otherNk.column}`;
+        const target = `${otherName}.${otherNk.column}`;
+        const unmatched = best.unmatched > 0 ? ` (${best.unmatched} of ${best.total} not found)` : "";
+        if (best === multi) {
+          col.multiDelimiter = delimiter;
+          col.reason = `"${delimiter}"-separated values found in ${target}${unmatched} — turn Multi on with delimiter "${delimiter}" when mapping`;
+        } else {
+          col.reason = `${best.unmatched > 0 ? "values" : "every value"} found in ${target}${unmatched}`;
+        }
         break;
       }
     }
@@ -256,27 +300,63 @@ function humanizeLabel(raw: string): string {
     .join(" ");
 }
 
+/**
+ * HubDB column name for a source header: lowercase snake_case
+ * ("Section 2 Content" → "section_2_content"). Names are what HubL reads
+ * (`row.section_2_content`) — spaces or capitals force `row["…"]` — while
+ * the header text stays on as the column label. Accents are folded, other
+ * symbols (®, #, …) dropped; a leading digit or HubSpot's reserved `hs_`
+ * prefix gets `col_` in front.
+ */
+export function hubdbColumnName(header: string): string {
+  const base = header
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+  if (base === "") return "column";
+  if (/^[0-9]/.test(base) || base.startsWith("hs_")) return `col_${base}`;
+  return base;
+}
+
+/** header → unique HubDB column name for one table (dupes get `_2`, `_3`, …). */
+export function columnNamesFor(headers: readonly string[]): Map<string, string> {
+  const out = new Map<string, string>();
+  const used = new Set<string>();
+  for (const h of headers) {
+    const base = hubdbColumnName(h);
+    let name = base;
+    for (let i = 2; used.has(name); i++) name = `${base}_${i}`;
+    used.add(name);
+    out.set(h, name);
+  }
+  return out;
+}
+
 // Turn inferred tables into the v1 schema shape the F3 provisioner
 // accepts. `isNaturalKey` + `reason` are UI-only annotations and get
-// stripped here.
+// stripped here. Inferred columns are keyed by source header (inference
+// reads cells by header); this is where they become HubDB names, so the
+// naturalKey and FK foreignColumn references are renamed with them.
 export function toSchema(tables: readonly InferredTable[]): Schema {
+  const namesByTable = new Map(tables.map((t) => [t.name, columnNamesFor(t.columns.map((c) => c.name))]));
+  const rename = (table: string, header: string) => namesByTable.get(table)?.get(header) ?? hubdbColumnName(header);
   return {
     version: 1,
     tables: tables.map((t) => {
       const schemaTable: SchemaTable = {
         name: t.name,
         label: t.label,
-        columns: t.columns.map(toSchemaColumn),
+        columns: t.columns.map((c) => {
+          const out: SchemaColumn = { name: rename(t.name, c.name), label: c.label, type: c.type };
+          if (c.foreignTable) out.foreignTable = c.foreignTable;
+          if (c.foreignTable && c.foreignColumn) out.foreignColumn = rename(c.foreignTable, c.foreignColumn);
+          return out;
+        }),
       };
-      if (t.naturalKey) schemaTable.naturalKey = t.naturalKey;
+      if (t.naturalKey) schemaTable.naturalKey = rename(t.name, t.naturalKey);
       return schemaTable;
     }),
   };
-}
-
-function toSchemaColumn(c: InferredColumn): SchemaColumn {
-  const out: SchemaColumn = { name: c.name, label: c.label, type: c.type };
-  if (c.foreignTable) out.foreignTable = c.foreignTable;
-  if (c.foreignColumn) out.foreignColumn = c.foreignColumn;
-  return out;
 }

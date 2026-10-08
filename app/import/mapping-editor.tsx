@@ -13,15 +13,18 @@ import { Checkbox } from "@/components/ui/checkbox";
 import {
   autoMap,
   countResolvable,
+  defaultImageFolder,
   detectTypeMismatch,
   initialForeignKeyConfig,
   initialMappingState as initialMappingStateLib,
+  resolveImageUpload,
   validatePathColumn,
   type ColumnAssignment,
   type ColumnMap,
   type ForeignKeyConfig,
   type FkMatching,
   type FkOnMissing,
+  type ImageUploadConfig,
   type MappingState as LibMappingState,
   type TypeMismatch,
 } from "@/lib/mapping";
@@ -127,6 +130,11 @@ export function MappingEditor({
     onChange({ ...value, foreignKeys: { ...value.foreignKeys, [sourceCol]: { ...current, ...patch } } });
   }
 
+  function setImageUpload(sourceCol: string, patch: Partial<ImageUploadConfig>) {
+    const current = resolveImageUpload(value, sourceCol);
+    onChange({ ...value, imageUploads: { ...value.imageUploads, [sourceCol]: { ...current, ...patch } } });
+  }
+
   function toggleNaturalKey(sourceCol: string) {
     const set = new Set(value.naturalKey);
     if (set.has(sourceCol)) set.delete(sourceCol);
@@ -165,7 +173,7 @@ export function MappingEditor({
         <label className="flex flex-col gap-1 text-sm">
           <span className="font-medium">Target HubDB table</span>
           <Select
-            value={value.targetTableName ?? undefined}
+            value={value.targetTableName ?? ""}
             onValueChange={(v) => v && chooseTarget(v)}
             items={portalTables.map((t) => ({
               value: t.name,
@@ -299,6 +307,66 @@ export function MappingEditor({
                       />
                     </li>
                   ))}
+                </ul>
+              </div>
+            );
+          })() : null}
+
+          {target ? (() => {
+            const imageCols = Object.entries(value.columnMap).flatMap(([sourceCol, a]) =>
+              a.kind === "mapped" &&
+              target.columns.some((c) => c.name === a.targetColumn && c.type === "IMAGE")
+                ? [{ sourceCol, targetCol: a.targetColumn }]
+                : [],
+            );
+            if (imageCols.length === 0) return null;
+            return (
+              <div className="space-y-3">
+                <h5 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                  Images ({imageCols.length})
+                </h5>
+                <ul className="space-y-3">
+                  {imageCols.map(({ sourceCol, targetCol }) => {
+                    const cfg = resolveImageUpload(value, sourceCol);
+                    return (
+                      <li key={sourceCol} className="space-y-2 rounded-md border border-border p-3 text-sm">
+                        <label className="flex cursor-pointer items-start gap-2">
+                          <Checkbox
+                            className="mt-0.5"
+                            checked={cfg.enabled}
+                            onChange={(e) => setImageUpload(sourceCol, { enabled: e.target.checked })}
+                          />
+                          <span>
+                            <span className="font-medium">
+                              Upload <code className="rounded bg-muted px-1">{sourceCol}</code> →{" "}
+                              <code className="rounded bg-muted px-1">{targetCol}</code> to the HubSpot File Manager
+                            </span>
+                            <span className="block text-xs text-muted-foreground">
+                              Each image URL is copied into HubSpot and the HubSpot-hosted link is stored in
+                              HubDB. Unchecked, HubDB keeps the external URL. Needs the token&apos;s{" "}
+                              <code>files.write</code> scope; an image that fails to upload keeps its original URL.
+                            </span>
+                          </span>
+                        </label>
+                        {cfg.enabled ? (
+                          <label className="flex flex-col gap-1 pl-6 text-xs">
+                            <span className="font-medium">File Manager folder</span>
+                            <input
+                              type="text"
+                              className="h-9 rounded-md border px-3 text-sm"
+                              value={value.imageUploads?.[sourceCol]?.folderPath ?? cfg.folderPath}
+                              onChange={(e) => setImageUpload(sourceCol, { folderPath: e.target.value })}
+                              onBlur={(e) => {
+                                if (!e.target.value.trim()) {
+                                  setImageUpload(sourceCol, { folderPath: defaultImageFolder(value.targetTableName) });
+                                }
+                              }}
+                            />
+                          </label>
+                        ) : null}
+                      </li>
+                    );
+                  })}
                 </ul>
               </div>
             );

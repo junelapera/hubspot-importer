@@ -362,3 +362,103 @@ describe("computeExecutionSignature", () => {
     expect(a).not.toBe(b);
   });
 });
+
+describe("synthesizeExecution — image uploads", () => {
+  it("lists IMAGE columns with upload on (default folder) and drops opted-out ones", () => {
+    const t = table("advisors", "T1", [
+      { name: "slug", type: "TEXT" },
+      { name: "photo", type: "IMAGE" },
+      { name: "logo", type: "IMAGE" },
+      { name: "site", type: "URL" },
+    ]);
+    const mapping: MappingState = {
+      ...initialMappingState(),
+      targetTableName: "advisors",
+      columnMap: {
+        slug: { kind: "mapped", targetColumn: "slug" },
+        Photo: { kind: "mapped", targetColumn: "photo" },
+        Logo: { kind: "mapped", targetColumn: "logo" },
+        Site: { kind: "mapped", targetColumn: "site" },
+      },
+      naturalKey: ["slug"],
+      imageUploads: { Logo: { enabled: false, folderPath: "/x" } },
+    };
+    const syn = synthesizeExecution({
+      sources: [{ name: "advisors", rows: [] }],
+      mappings: { advisors: mapping },
+      portalTables: [t],
+    });
+    expect(syn.imageColumns).toEqual({ advisors: { photo: { folderPath: "/hubdb-importer/advisors" } } });
+  });
+});
+
+describe("synthesizeExecution — unconfigured FK", () => {
+  it("reports fk-not-configured instead of silently dropping a mapped FOREIGN_ID column", () => {
+    const t = table("locations", "T2", [
+      { name: "slug", type: "TEXT" },
+      { name: "advisors", type: "FOREIGN_ID", foreignTableId: "T1" },
+    ]);
+    const mapping: MappingState = {
+      ...initialMappingState(),
+      targetTableName: "locations",
+      columnMap: {
+        slug: { kind: "mapped", targetColumn: "slug" },
+        "Cleaned Advisors": { kind: "mapped", targetColumn: "advisors" },
+      },
+      naturalKey: ["slug"],
+    };
+    const syn = synthesizeExecution({
+      sources: [{ name: "locations", rows: [{ slug: "a", "Cleaned Advisors": "x; y" }] }],
+      mappings: { locations: mapping },
+      portalTables: [t],
+    });
+    expect(syn.issues).toEqual([
+      { kind: "fk-not-configured", source: "locations", column: "Cleaned Advisors", targetColumn: "advisors" },
+    ]);
+    expect(syn.schema).toBeNull();
+  });
+});
+
+describe("synthesizeExecution — FK on a non-FOREIGN_ID column", () => {
+  it("reports fk-on-non-foreign-column", () => {
+    const t = table("advisors", "T1", [{ name: "slug", type: "TEXT" }]);
+    const mapping: MappingState = {
+      ...initialMappingState(),
+      targetTableName: "advisors",
+      columnMap: { slug: { kind: "mapped", targetColumn: "slug" } },
+      naturalKey: ["slug"],
+      foreignKeys: { slug: { ...initialForeignKeyConfig(), sourceTable: "locations", matchKey: "team" } },
+    };
+    const syn = synthesizeExecution({
+      sources: [{ name: "advisors", rows: [{ slug: "a" }] }],
+      mappings: { advisors: mapping },
+      portalTables: [t],
+    });
+    expect(syn.issues).toEqual([
+      { kind: "fk-on-non-foreign-column", source: "advisors", column: "slug", targetColumn: "slug", targetType: "TEXT" },
+    ]);
+  });
+});
+
+describe("synthesizeExecution — mapped column missing from the target", () => {
+  it("reports target-column-missing instead of silently dropping it", () => {
+    const t = table("advisors", "T1", [{ name: "slug", type: "TEXT" }, { name: "department", type: "SELECT" }]);
+    const mapping: MappingState = {
+      ...initialMappingState(),
+      targetTableName: "advisors",
+      columnMap: {
+        slug: { kind: "mapped", targetColumn: "slug" },
+        Department: { kind: "mapped", targetColumn: "Department" },
+      },
+      naturalKey: ["slug"],
+    };
+    const syn = synthesizeExecution({
+      sources: [{ name: "advisors", rows: [{ slug: "a", Department: "CFA®" }] }],
+      mappings: { advisors: mapping },
+      portalTables: [t],
+    });
+    expect(syn.issues).toEqual([
+      { kind: "target-column-missing", source: "advisors", column: "Department", targetColumn: "Department", table: "advisors" },
+    ]);
+  });
+});

@@ -16,6 +16,11 @@ import type { MappingState } from "@/lib/mapping";
 type PublishMode = "none" | "foreign-only" | "all";
 
 type PublishedEntry = { table: string; publishedAt?: string; error?: string };
+type ImagesSummary = {
+  uploaded: number;
+  reused?: number;
+  failed: { url: string; folderPath: string; error: string }[];
+};
 
 // The shape the polling endpoint returns.
 type JobPollResponse = {
@@ -40,6 +45,7 @@ type JobPollResponse = {
     hubspot?: { status: number; path: string; method: string; body?: unknown };
     row?: RowError;
     fail?: { kind: "fail-fast" | "cancelled"; message: string };
+    images?: ImagesSummary;
   } | null;
 };
 
@@ -57,6 +63,7 @@ type ExecuteResponse = {
   error?: string;
   issues?: unknown[];
   hubspot?: { status: number; path: string; method: string; body?: unknown };
+  images?: ImagesSummary;
 };
 
 type Stage =
@@ -176,6 +183,7 @@ export function ExecutePanel({
       autoSavedProfile: autoSavedRef.current,
       row: body.response?.row,
       hubspot: body.response?.hubspot,
+      images: body.response?.images,
       error: body.error ?? body.response?.fail?.message ?? undefined,
     };
 
@@ -559,6 +567,37 @@ function formatDuration(ms: number): string {
   return mm === 0 ? `${h}h` : `${h}h ${mm}m`;
 }
 
+function ImagesCard({ images }: { images: ImagesSummary }) {
+  const failed = images.failed.length;
+  return (
+    <div
+      className={
+        "rounded-md border p-3 text-xs space-y-1 " +
+        (failed > 0 ? "border-yellow-500/30 bg-yellow-500/5" : "border-border")
+      }
+    >
+      <p className="font-medium">
+        Images · {images.uploaded.toLocaleString()} copied to the File Manager
+        {images.reused ? ` · ${images.reused.toLocaleString()} already there, reused` : ""}
+        {failed > 0 ? ` · ${failed.toLocaleString()} kept their original URL` : ""}
+      </p>
+      {failed > 0 ? (
+        <details>
+          <summary className="cursor-pointer text-muted-foreground">Upload failures</summary>
+          <ul className="mt-1 space-y-0.5">
+            {images.failed.map((f) => (
+              <li key={`${f.folderPath}|${f.url}`} className="break-all">
+                <code className="rounded bg-muted px-1">{f.url}</code>{" "}
+                <span className="text-destructive">— {f.error}</span>
+              </li>
+            ))}
+          </ul>
+        </details>
+      ) : null}
+    </div>
+  );
+}
+
 function ResultView({
   response,
   portalId,
@@ -633,6 +672,7 @@ function ResultView({
                   result,
                   events: response.events ?? [],
                   published: response.published ?? [],
+                  images: response.images,
                 },
                 null,
                 2,
@@ -656,6 +696,8 @@ function ResultView({
           <TableCard key={t.name} table={t} />
         ))}
       </ul>
+
+      {response.images ? <ImagesCard images={response.images} /> : null}
 
       {response.published && response.published.length > 0 ? (
         <div className="rounded-md border border-border p-3 text-xs space-y-1">

@@ -1,4 +1,4 @@
-import { toposortOrThrow, nodesFromTableInputs, GraphCycleError } from "../graph";
+import { toposortOrThrow, type GraphNode } from "../graph";
 import {
   buildKeyMap,
   composeCompositeKey,
@@ -11,6 +11,7 @@ import {
   type NormalizeOptions,
 } from "../resolve";
 import type { Schema, SchemaTable } from "../schema";
+import { matchOption, optionLabels, optionsOf, splitMultiSelect } from "../select-options";
 import { HubdbError, type HubdbClient } from "./client";
 import {
   batchCreateDraftRows,
@@ -317,7 +318,7 @@ class CoerceError {
 // BOOLEAN wants a real JSON boolean; DATE / DATETIME want epoch milliseconds
 // (integer). Our source layer treats every cell as a string, so coerce at
 // the write boundary based on the target column type.
-function coerceCellForColumn(raw: unknown, columnType: string): unknown {
+function coerceCellForColumn(raw: unknown, columnType: string, options?: unknown): unknown {
   if (raw === undefined || raw === null) return SKIP_CELL;
   const s = typeof raw === "string" ? raw.trim() : raw;
   if (s === "") return SKIP_CELL;
@@ -346,8 +347,42 @@ function coerceCellForColumn(raw: unknown, columnType: string): unknown {
       if (!Number.isFinite(parsed)) return new CoerceError(`not a valid ${columnType}`);
       return parsed;
     }
+    case "SELECT": {
+      if (typeof s === "object") return s;
+      const opts = optionsOf(options);
+      // No option list known (hand-authored schema) — let HubDB validate.
+      if (!opts) return { name: String(s), type: "option" };
+      const hit = matchOption(String(s), opts);
+      if (!hit) return new CoerceError(`"${s}" isn't an option (${optionLabels(opts)})`);
+      return { name: hit, type: "option" };
+    }
+    case "MULTISELECT": {
+      if (Array.isArray(s)) return s;
+      const opts = optionsOf(options);
+      const { matched, unknown } = splitMultiSelect(String(s), opts);
+      if (unknown.length > 0) {
+        return new CoerceError(
+          `${unknown.map((u) => `"${u}"`).join(", ")} ${unknown.length === 1 ? "isn't an option" : "aren't options"}` +
+            (opts ? ` (${optionLabels(opts)})` : ""),
+        );
+      }
+      if (matched.length === 0) return SKIP_CELL;
+      return matched.map((name) => ({ name, type: "option" }));
+    }
+    case "IMAGE": {
+      // HubDB rejects a bare URL string (and `{url}` alone) with
+      // INVALID_IMAGE_VARIANT_VALUE — the minimal accepted cell is
+      // `{url, type: "image"}`; width/height/altText are optional.
+      // Already-shaped objects (JSON source) pass through.
+      if (typeof s === "object") return s;
+      const url = String(s);
+      if (!/^https?:\/\//i.test(url)) {
+        return new CoerceError("not an image URL (must start with http:// or https://)");
+      }
+      return { url, type: "image" };
+    }
     default:
-      // TEXT, RICHTEXT, URL, IMAGE, SELECT, MULTISELECT, VIDEO, CTA, FILE,
+      // TEXT, RICHTEXT, URL, VIDEO, CTA, FILE,
       // LOCATION — send as-is. HubSpot parses these server-side.
       return raw;
   }
@@ -403,7 +438,7 @@ function planRow(
     if (raw === undefined) continue;
 
     if (col.type !== "FOREIGN_ID") {
-      const coerced = coerceCellForColumn(raw, col.type);
+      const coerced = coerceCellForColumn(raw, col.type, col.options);
       if (coerced === SKIP_CELL) continue;
       if (coerced instanceof CoerceError) {
         return {
@@ -877,20 +912,31 @@ async function importOneTable(
   return result;
 }
 
+// Import-schema FK columns name their target via `foreignTable` (the
+// HubDB wire shape's `foreignTableName` never appears here). Reading the
+// wrong field leaves every table dependency-free, so tables would run in
+// upload order and a referencing table could go before its target.
+function schemaDependencyNodes(tables: readonly SchemaTable[]): GraphNode[] {
+  const known = new Set(tables.map((t) => t.name));
+  return tables.map((t) => {
+    const deps = new Set<string>();
+    for (const col of t.columns) {
+      if (col.type === "FOREIGN_ID" && col.foreignTable && col.foreignTable !== t.name && known.has(col.foreignTable)) {
+        deps.add(col.foreignTable);
+      }
+    }
+    return { name: t.name, dependencies: [...deps] };
+  });
+}
+
 export async function importRows(
   ops: ImportOps,
   input: ImportInput,
   opts: ImportOptions = {},
 ): Promise<ImportResult> {
-  let order: string[];
-  try {
-    order = toposortOrThrow(nodesFromTableInputs(input.schema.tables));
-  } catch (err) {
-    if (err instanceof GraphCycleError) {
-      throw err;
-    }
-    throw err;
-  }
+  // GraphCycleError propagates — cyclic FKs need the provisioner's
+  // two-phase strategy, not a row import.
+  const order = toposortOrThrow(schemaDependencyNodes(input.schema.tables));
 
   const schemaByName = new Map(input.schema.tables.map((t) => [t.name, t]));
   const keyMapsByTable = new Map<string, Map<string, string>>();
