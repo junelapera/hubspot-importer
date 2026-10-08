@@ -10,6 +10,7 @@ import {
 } from "./mapping";
 import { composeCompositeKey, normalizeKey, splitMultiValue, type NormalizeOptions } from "./resolve";
 import { invalidOptionValues } from "./select-options";
+import { fkTargetProblem } from "./execution";
 
 // F7 — dry run. Given mappings, source rows, portal tables, and existing
 // draft rows per target, project what an execute would do without writing
@@ -135,6 +136,8 @@ function reportForSource(
   target: HubdbTable | undefined,
   existingRows: ReadonlyArray<HubdbRow>,
   sourcesByName: ReadonlyMap<string, DryRunSource>,
+  allMappings: Readonly<Record<string, MappingState>>,
+  portalTables: ReadonlyArray<HubdbTable>,
 ): DryRunTableReport {
   const errors: string[] = [];
   if (!target) errors.push(`no target table "${mapping.targetTableName}" on the portal`);
@@ -248,6 +251,11 @@ function reportForSource(
       );
       continue;
     }
+    const fkProblem = fkTargetProblem(allMappings, portalTables, cfg.sourceTable, cfg.matchKey);
+    if (fkProblem) {
+      errors.push(`"${sourceCol}" links to ${cfg.sourceTable}.${cfg.matchKey}, but ${fkProblem.detail}`);
+      continue;
+    }
     const sibling = sourcesByName.get(cfg.sourceTable);
     if (!sibling) continue;
     const fkNormOpts = normalizeOptionsFor(cfg.matching);
@@ -298,7 +306,7 @@ export function computeDryRun(input: DryRunInput): DryRunReport {
     const mapping = input.mappings[name] ?? initialMappingState();
     const target = mapping.targetTableName ? findTarget(input.portalTables, mapping.targetTableName) : undefined;
     const existingRows = (target && input.existingRowsByTarget[target.name]) ?? [];
-    tables.push(reportForSource(source, mapping, target, existingRows, sourcesByName));
+    tables.push(reportForSource(source, mapping, target, existingRows, sourcesByName, input.mappings, input.portalTables));
   }
 
   const projectedApiCalls = tables.reduce((n, t) => n + t.apiCalls, 0);

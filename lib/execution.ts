@@ -43,7 +43,16 @@ export type ExecutionSynthesisIssue =
   | { kind: "missing-target"; source: string; targetName: string | null }
   | { kind: "missing-natural-key"; source: string }
   | { kind: "natural-key-not-mapped"; source: string; column: string }
-  | { kind: "fk-target-column-missing"; source: string; column: string; foreignSource: string; matchKey: string }
+  | {
+      kind: "fk-target-column-missing";
+      source: string;
+      column: string;
+      foreignSource: string;
+      matchKey: string;
+      // Which link in the chain is broken, so the UI can say what to fix.
+      reason: FkTargetProblem;
+      detail: string;
+    }
   // FOREIGN_ID target mapped but no sibling source / match key picked —
   // without this check the importer silently drops the column.
   | { kind: "fk-not-configured"; source: string; column: string; targetColumn: string }
@@ -92,6 +101,56 @@ function targetForSource(source: string, mapping: MappingState): string | null {
 function mapTargetName(mapping: MappingState, sourceCol: string): string | null {
   const a = mapping.columnMap[sourceCol];
   return a?.kind === "mapped" ? a.targetColumn : null;
+}
+
+export type FkTargetProblem = "foreign-source-unmapped" | "foreign-no-target" | "match-key-unmapped" | "match-key-column-missing";
+
+/**
+ * Why an FK's match key can't be resolved to a column on the foreign
+ * table's HubDB target — or null when it can. The FK resolves against the
+ * foreign source's natural-key map, which lives in target space, so the
+ * match key must be a source column of the foreign source that's mapped
+ * to a column its target table actually has. Shared by synthesis (blocks
+ * execute) and the dry run (explains it up front).
+ */
+export function fkTargetProblem(
+  mappings: Readonly<Record<string, MappingState>>,
+  portalTables: ReadonlyArray<HubdbTable>,
+  foreignSource: string,
+  matchKey: string,
+): { reason: FkTargetProblem; detail: string } | null {
+  const sibling = mappings[foreignSource];
+  if (!sibling) {
+    return {
+      reason: "foreign-source-unmapped",
+      detail: `"${foreignSource}" has no mapping — configure it (pick its target table) too`,
+    };
+  }
+  const target = sibling.targetTableName
+    ? portalTables.find((t) => t.name === sibling.targetTableName)
+    : undefined;
+  if (!target) {
+    return {
+      reason: "foreign-no-target",
+      detail: sibling.targetTableName
+        ? `"${foreignSource}" targets table "${sibling.targetTableName}", which isn't on the portal`
+        : `"${foreignSource}" has no target table picked`,
+    };
+  }
+  const col = mapTargetName(sibling, matchKey);
+  if (!col) {
+    return {
+      reason: "match-key-unmapped",
+      detail: `match key "${matchKey}" isn't mapped to a column in "${foreignSource}" — map it to a column of "${target.name}"`,
+    };
+  }
+  if (!target.columns.some((c) => c.name === col)) {
+    return {
+      reason: "match-key-column-missing",
+      detail: `"${foreignSource}.${matchKey}" is mapped to "${col}", which table "${target.name}" doesn't have — re-pick it`,
+    };
+  }
+  return null;
 }
 
 export function synthesizeExecution(input: ExecutionSynthesisInput): ExecutionSynthesis {
@@ -189,22 +248,20 @@ export function synthesizeExecution(input: ExecutionSynthesisInput): ExecutionSy
       }
       if (fk?.sourceTable && fk?.matchKey) {
         col.foreignTable = fk.sourceTable;
-        const siblingMapping = input.mappings[fk.sourceTable];
-        const siblingTarget = siblingMapping?.targetTableName
-          ? input.portalTables.find((t) => t.name === siblingMapping.targetTableName)
-          : undefined;
-        const siblingTargetCol = siblingMapping ? mapTargetName(siblingMapping, fk.matchKey) : null;
-        if (!siblingTarget || !siblingTargetCol || !siblingTarget.columns.some((c) => c.name === siblingTargetCol)) {
+        const problem = fkTargetProblem(input.mappings, input.portalTables, fk.sourceTable, fk.matchKey);
+        if (problem) {
           issues.push({
             kind: "fk-target-column-missing",
             source: s.name,
             column: sourceCol,
             foreignSource: fk.sourceTable,
             matchKey: fk.matchKey,
+            ...problem,
           });
           synthFailed = true;
           break;
         }
+        const siblingTargetCol = mapTargetName(input.mappings[fk.sourceTable], fk.matchKey)!;
         col.foreignColumn = siblingTargetCol;
 
         const opt: FkColumnOption = {};

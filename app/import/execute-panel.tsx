@@ -385,7 +385,17 @@ export function ExecutePanel({
         <div className="rounded-md border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">
           <p>{stage.message}</p>
           {stage.issues && stage.issues.length > 0 ? (
-            <pre className="mt-2 overflow-x-auto text-xs">{JSON.stringify(stage.issues, null, 2)}</pre>
+            <>
+              <ul className="mt-2 list-disc space-y-1 pl-5 text-xs">
+                {stage.issues.map((issue, i) => (
+                  <li key={i}>{describeIssue(issue)}</li>
+                ))}
+              </ul>
+              <details className="mt-2 text-xs">
+                <summary className="cursor-pointer">Raw issues</summary>
+                <pre className="mt-1 overflow-x-auto">{JSON.stringify(stage.issues, null, 2)}</pre>
+              </details>
+            </>
           ) : null}
           {stage.hubspot ? (
             <details className="mt-2 text-xs">
@@ -565,6 +575,37 @@ function formatDuration(ms: number): string {
   const h = Math.floor(m / 60);
   const mm = m % 60;
   return mm === 0 ? `${h}h` : `${h}h ${mm}m`;
+}
+
+// Plain-language line for an ExecutionSynthesisIssue (lib/execution.ts) or
+// a validation issue. Unknown shapes fall back to JSON.
+function describeIssue(raw: unknown): string {
+  const i = (raw ?? {}) as Record<string, unknown> & { kind?: string };
+  const q = (v: unknown) => `"${String(v)}"`;
+  switch (i.kind) {
+    case "fk-target-column-missing":
+      return `${q(i.source)} → ${q(i.column)} links to ${i.foreignSource}.${i.matchKey}, but ${String(i.detail ?? "that column can't be resolved")}.`;
+    case "fk-not-configured":
+      return `${q(i.source)} → ${q(i.column)} is a FOREIGN_ID column with no foreign-key setup — pick its source table and match key.`;
+    case "fk-on-non-foreign-column":
+      return `${q(i.source)} → ${q(i.column)} has a foreign-key link but its target column ${q(i.targetColumn)} is ${String(i.targetType)} — remove the link (probably drawn backwards).`;
+    case "target-column-missing":
+      return `${q(i.source)} → ${q(i.column)} is mapped to ${q(i.targetColumn)}, which table ${q(i.table)} no longer has — re-pick the target column.`;
+    case "missing-target":
+      return i.targetName
+        ? `${q(i.source)} targets table ${q(i.targetName)}, which isn't on the portal.`
+        : `${q(i.source)} has no target table picked.`;
+    case "missing-natural-key":
+      return `${q(i.source)} has no natural key — tick a Key column.`;
+    case "natural-key-not-mapped":
+      return `${q(i.source)}: natural-key column ${q(i.column)} isn't mapped to a target column.`;
+    case "cell-too-long":
+      return `${q(i.source)} → ${q(i.sourceColumn)}: ${String(i.count)} cell(s) exceed the ${String(i.maxLength)}-character ${String(i.targetType)} limit.`;
+    case "page-path-invalid":
+      return `${q(i.source)} → ${q(i.column)}: page paths must be unique, lowercase, and URL-safe.`;
+    default:
+      return JSON.stringify(raw);
+  }
 }
 
 function ImagesCard({ images }: { images: ImagesSummary }) {

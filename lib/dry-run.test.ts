@@ -321,3 +321,40 @@ describe("computeDryRun — dropdown options", () => {
     expect(warnings.find((w) => w.targetColumn === "tags")).toMatchObject({ badCount: 1, examples: ["Teal"] });
   });
 });
+
+describe("computeDryRun — FK match key not resolvable on the foreign target", () => {
+  it("errors with the reason instead of passing and failing later at execute", () => {
+    const advisors = table("advisors", "T1", [{ name: "page_path", type: "TEXT" }]);
+    const locations = table("locations", "T2", [
+      { name: "slug", type: "TEXT" },
+      { name: "advisors", type: "FOREIGN_ID", foreignTableId: "T1" },
+    ]);
+    const mappings: Record<string, MappingState> = {
+      Advisors_Google: {
+        ...initialMappingState(),
+        targetTableName: "advisors",
+        columnMap: { "Page Path": { kind: "unmapped" } },
+        naturalKey: [],
+      },
+      Locations_Google: {
+        ...initialMappingState(),
+        targetTableName: "locations",
+        columnMap: { slug: { kind: "mapped", targetColumn: "slug" }, Advisors: { kind: "mapped", targetColumn: "advisors" } },
+        naturalKey: ["slug"],
+        foreignKeys: { Advisors: { ...initialForeignKeyConfig(), sourceTable: "Advisors_Google", matchKey: "Page Path", multi: true } },
+      },
+    };
+    const report = computeDryRun({
+      sources: [
+        { name: "Advisors_Google", headers: ["Page Path"], rows: [{ "Page Path": "a" }] },
+        { name: "Locations_Google", headers: ["slug", "Advisors"], rows: [{ slug: "x", Advisors: "a" }] },
+      ],
+      mappings,
+      portalTables: [advisors, locations],
+      existingRowsByTarget: {},
+    });
+    const loc = report.tables.find((t) => t.sourceName === "Locations_Google");
+    expect(report.ok).toBe(false);
+    expect(loc?.errors.some((e) => e.includes(`match key "Page Path" isn't mapped`))).toBe(true);
+  });
+});

@@ -79,6 +79,41 @@ describe("synthesizeExecution — FK translation", () => {
     expect(brandCol?.foreignColumn).toBe("slug");
   });
 
+  it.each([
+    ["foreign source has no target table", { ...brandsMapping, targetTableName: null }, "foreign-no-target"],
+    ["match key left unmapped on the foreign source", { ...brandsMapping, columnMap: { slug: { kind: "unmapped" as const } } }, "match-key-unmapped"],
+    [
+      "match key mapped to a column the target lacks",
+      { ...brandsMapping, columnMap: { slug: { kind: "mapped" as const, targetColumn: "gone" } } },
+      "match-key-column-missing",
+    ],
+  ])("fk-target-column-missing explains why: %s", (_label, brandsState, reason) => {
+    const syn = synthesizeExecution({
+      sources: [
+        { name: "brands", rows: [] },
+        { name: "products", rows: [] },
+      ],
+      mappings: { brands: brandsState as MappingState, products: productsMapping },
+      portalTables: [brands, products],
+    });
+    const issue = syn.issues.find((i) => i.kind === "fk-target-column-missing");
+    expect(issue).toMatchObject({ source: "products", column: "brand", foreignSource: "brands", matchKey: "slug", reason });
+    expect(issue && "detail" in issue ? issue.detail : "").toContain("brands");
+  });
+
+  it("fk-target-column-missing explains why: foreign source has no mapping at all", () => {
+    const syn = synthesizeExecution({
+      sources: [
+        { name: "brands", rows: [] },
+        { name: "products", rows: [] },
+      ],
+      mappings: { products: productsMapping },
+      portalTables: [brands, products],
+    });
+    const issue = syn.issues.find((i) => i.kind === "fk-target-column-missing");
+    expect(issue).toMatchObject({ foreignSource: "brands", reason: "foreign-source-unmapped" });
+  });
+
   it("emits fkOptions.onMissing when the user picks 'null' and omits it for 'skip-row'", () => {
     const productsNull: MappingState = {
       ...productsMapping,
