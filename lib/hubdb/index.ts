@@ -91,3 +91,6 @@ export type {
   SourceRow,
   TableImportResult,
 } from "./import";
+
+export { FilesScopeError, importFileFromUrl, listFolderFiles, uploadImages } from "./files";
+export type { ImportFromUrlOptions, UploadImagesResult } from "./files";

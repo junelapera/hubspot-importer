@@ -1,6 +1,12 @@
 import { createHash } from "node:crypto";
 import type { HubdbTable, FkColumnOption } from "./hubdb";
-import { type ForeignKeyConfig, type MappingState, validatePathColumn, type PathValidationIssue } from "./mapping";
+import {
+  type ForeignKeyConfig,
+  type MappingState,
+  resolveImageUpload,
+  validatePathColumn,
+  type PathValidationIssue,
+} from "./mapping";
 import type { Schema, SchemaColumn, SchemaTable } from "./schema";
 import { HUBDB_RICHTEXT_MAX, HUBDB_TEXT_MAX } from "./source/validate";
 
@@ -38,6 +44,16 @@ export type ExecutionSynthesisIssue =
   | { kind: "missing-natural-key"; source: string }
   | { kind: "natural-key-not-mapped"; source: string; column: string }
   | { kind: "fk-target-column-missing"; source: string; column: string; foreignSource: string; matchKey: string }
+  // FOREIGN_ID target mapped but no sibling source / match key picked —
+  // without this check the importer silently drops the column.
+  | { kind: "fk-not-configured"; source: string; column: string; targetColumn: string }
+  // Mapped onto a column the (draft) table no longer has — e.g. it was
+  // deleted and re-created in HubSpot under a new internal name. Used to
+  // be skipped silently; sending it 400s "Column name '…' is invalid".
+  | { kind: "target-column-missing"; source: string; column: string; targetColumn: string; table: string }
+  // FK config left on a column whose target isn't FOREIGN_ID (e.g. a
+  // backwards canvas drag). Would skew import order and write nothing.
+  | { kind: "fk-on-non-foreign-column"; source: string; column: string; targetColumn: string; targetType: string }
   | {
       kind: "cell-too-long";
       source: string;
@@ -61,6 +77,9 @@ export interface ExecutionSynthesis {
   tableIds: Record<string, string>;
   source: Record<string, Record<string, unknown>[]>;
   fkOptions: Record<string, Record<string, FkColumnOption>>;
+  // IMAGE columns whose URLs get copied into the File Manager before the
+  // import: table (source name) → target column → destination folder.
+  imageColumns: Record<string, Record<string, { folderPath: string }>>;
   issues: ExecutionSynthesisIssue[];
 }
 
@@ -80,6 +99,7 @@ export function synthesizeExecution(input: ExecutionSynthesisInput): ExecutionSy
   const tableIds: Record<string, string> = {};
   const source: Record<string, Record<string, unknown>[]> = {};
   const fkOptions: Record<string, Record<string, FkColumnOption>> = {};
+  const imageColumns: Record<string, Record<string, { folderPath: string }>> = {};
   const schemaTables: SchemaTable[] = [];
 
   for (const s of input.sources) {
@@ -126,9 +146,23 @@ export function synthesizeExecution(input: ExecutionSynthesisInput): ExecutionSy
     for (const [sourceCol, assignment] of Object.entries(mapping.columnMap)) {
       if (assignment.kind !== "mapped") continue;
       const tc = target.columns.find((c) => c.name === assignment.targetColumn);
-      if (!tc) continue;
+      if (!tc) {
+        issues.push({
+          kind: "target-column-missing",
+          source: s.name,
+          column: sourceCol,
+          targetColumn: assignment.targetColumn,
+          table: target.name,
+        });
+        synthFailed = true;
+        break;
+      }
       const col: SchemaColumn = { name: tc.name, type: tc.type };
       if (tc.label) col.label = tc.label;
+      // The importer matches SELECT / MULTISELECT cells against these.
+      if ((tc.type === "SELECT" || tc.type === "MULTISELECT") && tc.options !== undefined) {
+        col.options = tc.options;
+      }
 
       // FK column: the sibling reference must be translated too. In our
       // synthesized schema each table is named after the SOURCE, so the
@@ -137,6 +171,22 @@ export function synthesizeExecution(input: ExecutionSynthesisInput): ExecutionSy
       // column name for the sibling's matchKey (importRows uses schema
       // column names for its key-map lookup).
       const fk = mapping.foreignKeys[sourceCol] as ForeignKeyConfig | undefined;
+      if (tc.type !== "FOREIGN_ID" && fk?.sourceTable) {
+        issues.push({
+          kind: "fk-on-non-foreign-column",
+          source: s.name,
+          column: sourceCol,
+          targetColumn: tc.name,
+          targetType: String(tc.type),
+        });
+        synthFailed = true;
+        break;
+      }
+      if (tc.type === "FOREIGN_ID" && !(fk?.sourceTable && fk?.matchKey)) {
+        issues.push({ kind: "fk-not-configured", source: s.name, column: sourceCol, targetColumn: tc.name });
+        synthFailed = true;
+        break;
+      }
       if (fk?.sourceTable && fk?.matchKey) {
         col.foreignTable = fk.sourceTable;
         const siblingMapping = input.mappings[fk.sourceTable];
@@ -256,6 +306,16 @@ export function synthesizeExecution(input: ExecutionSynthesisInput): ExecutionSy
     tableIds[s.name] = target.id;
     if (Object.keys(tableFkOptions).length > 0) fkOptions[s.name] = tableFkOptions;
 
+    const tableImages: Record<string, { folderPath: string }> = {};
+    for (const [sourceCol, assignment] of Object.entries(mapping.columnMap)) {
+      if (assignment.kind !== "mapped") continue;
+      const tc = target.columns.find((c) => c.name === assignment.targetColumn);
+      if (tc?.type !== "IMAGE") continue;
+      const cfg = resolveImageUpload(mapping, sourceCol);
+      if (cfg.enabled) tableImages[tc.name] = { folderPath: cfg.folderPath };
+    }
+    if (Object.keys(tableImages).length > 0) imageColumns[s.name] = tableImages;
+
     // Transform source rows: {targetCol: source[sourceCol]} for every
     // mapped column. FK cells stay as raw strings — the importer splits
     // multi-value cells at plan time using fkOptions.
@@ -275,7 +335,7 @@ export function synthesizeExecution(input: ExecutionSynthesisInput): ExecutionSy
   const schema: Schema | null =
     schemaTables.length > 0 ? { version: 1, tables: schemaTables } : null;
 
-  return { schema, tableIds, source, fkOptions, issues };
+  return { schema, tableIds, source, fkOptions, imageColumns, issues };
 }
 
 // Recursively sort object keys so JSON.stringify produces a canonical byte

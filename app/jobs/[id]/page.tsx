@@ -5,6 +5,7 @@ import { getJobById, listJobErrors } from "@/lib/db/jobs";
 import { createSupabaseServerClient } from "@/lib/db/supabase";
 import { Breadcrumbs } from "@/components/ui/breadcrumbs";
 import { ErrorCard } from "@/components/ui/error-card";
+import { DeleteJobButton } from "./delete-job-button";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -35,21 +36,24 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
           { label: job?.id ? `Job ${shortId(job.id)}` : "Job" },
         ]}
       />
-      <header className="space-y-1">
-        <h1 className="text-xl font-semibold">Job {job?.id}</h1>
-        {job ? (
-          <p className="text-sm text-muted-foreground">
-            {job.mappingName ? (
-              <>
-                {job.mappingName} · {job.portalLabel} ({job.portalEnv})
-              </>
-            ) : (
-              <span className="italic">profile deleted — provenance link lost</span>
-            )}
-            {" · "}
-            {job.kind}
-          </p>
-        ) : null}
+      <header className="flex flex-wrap items-start justify-between gap-3">
+        <div className="space-y-1">
+          <h1 className="text-xl font-semibold">Job {job?.id}</h1>
+          {job ? (
+            <p className="text-sm text-muted-foreground">
+              {job.mappingName ? (
+                <>
+                  {job.mappingName} · {job.portalLabel} ({job.portalEnv})
+                </>
+              ) : (
+                <span className="italic">profile deleted — provenance link lost</span>
+              )}
+              {" · "}
+              {job.kind}
+            </p>
+          ) : null}
+        </div>
+        {job ? <DeleteJobButton jobId={job.id} status={job.status} /> : null}
       </header>
 
       {loadError ? <ErrorCard error={loadError} /> : null}

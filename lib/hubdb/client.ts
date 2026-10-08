@@ -3,6 +3,9 @@ const DEFAULT_ORIGIN = "https://api.hubapi.com";
 const BASE_PATHS = {
   v3: "/cms/v3/hubdb",
   dated: "/cms/hubdb/2026-03",
+  // Not HubDB, but same token / retry / error semantics — used by
+  // lib/hubdb/files.ts to copy images into the File Manager.
+  files: "/files/v3",
 } as const;
 
 export type HubdbApiBase = keyof typeof BASE_PATHS;

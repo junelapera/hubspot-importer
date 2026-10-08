@@ -9,7 +9,8 @@ import {
   type HubdbRow,
 } from "@/lib/hubdb";
 import { computeDryRun, type DryRunSource } from "@/lib/dry-run";
-import { computeExecutionSignature } from "@/lib/execution";
+import { computeExecutionSignature, synthesizeExecution } from "@/lib/execution";
+import { planImageUploads } from "@/lib/image-uploads";
 import type { MappingState } from "@/lib/mapping";
 
 export const runtime = "nodejs";
@@ -93,6 +94,10 @@ export async function POST(
     existingRowsByTarget,
   });
 
+  // Distinct image URLs the run would copy into the File Manager.
+  const synth = synthesizeExecution({ sources, mappings, portalTables: snapshot.tables });
+  const imageUploads = planImageUploads(synth.source, synth.imageColumns).length;
+
   // Fingerprint of the inputs so the execute endpoint can gate on a
   // completed dry run (PRD F7). Any change to sources or mappings
   // invalidates it. Strip `headers` — the execute endpoint doesn't
@@ -106,6 +111,7 @@ export async function POST(
     portal: { id: portal.id, label: portal.label, env: portal.env },
     fetchedAt: snapshot.fetchedAt,
     report,
+    imageUploads,
     signature,
     readErrors: Object.keys(readErrors).length ? readErrors : undefined,
   });
