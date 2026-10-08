@@ -2,6 +2,7 @@ import type { GraphEdge, GraphNode } from "../graph";
 import { breakCycles } from "../graph";
 import type { DiffPlan, SchemaColumn, SchemaTable, TableDiff } from "../schema";
 import type { HubdbClient } from "./client";
+import { isPageField } from "./page-fields";
 import { createTable, patchTable, type TableRef } from "./tables";
 import type {
   HubdbColumn,
@@ -104,6 +105,13 @@ function partitionColumns(
   return { immediate, deferred: later };
 }
 
+// PATCH is full-replace on columns (F0-11), so every PATCH resends the
+// portal's columns — minus the hs_path / hs_name pseudo-columns the
+// portal snapshot carries for page tables, which aren't real columns.
+function realColumns(columns: readonly HubdbColumn[]): HubdbColumn[] {
+  return columns.filter((c) => !isPageField(c.name));
+}
+
 type WorkDiff = Extract<TableDiff, { action: "create" } | { action: "update" }>;
 
 function candidateColumns(diff: WorkDiff): SchemaColumn[] {
@@ -193,7 +201,7 @@ export async function provision(
     if (immediate.length === 0) continue;
     emit({ kind: "update-start", table: name, addColumns: immediate.map((c) => c.name) });
     const merged: (HubdbColumnInput & { id?: string })[] = [
-      ...diff.portal.columns.map(portalColumnToInput),
+      ...realColumns(diff.portal.columns).map(portalColumnToInput),
       ...immediate.map(schemaColumnToInput),
     ];
     const patched = await ops.patchTable(diff.portal.id, { columns: merged });
@@ -214,7 +222,7 @@ export async function provision(
     if (deferredCols.length === 0) continue;
     emit({ kind: "defer-patch-start", table: source, addColumns: deferredCols.map((c) => c.name) });
     const merged: (HubdbColumnInput & { id?: string })[] = [
-      ...current.columns.map(portalColumnToInput),
+      ...realColumns(current.columns).map(portalColumnToInput),
       ...deferredCols.map(schemaColumnToInput),
     ];
     const patched = await ops.patchTable(current.id, { columns: merged });

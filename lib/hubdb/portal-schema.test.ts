@@ -72,6 +72,21 @@ describe("fetchPortalSchema", () => {
     expect(okOut?.draftColumns.map((c) => c.name)).toEqual(["slug", "name"]);
   });
 
+  it("adds hs_path / hs_name pseudo-columns to page tables' columns only", async () => {
+    const pages = table("1", "team", [col("1", "title")], { useForPages: true });
+    const plain = table("2", "brands", [col("1", "slug")]);
+    const snapshot = await fetchPortalSchema(
+      fakeClient({
+        onList: () => ({ results: [pages, plain] }),
+        onGetDraft: (ref) => (ref === "1" ? pages : plain),
+      }),
+    );
+    const team = snapshot.tables.find((t) => t.id === "1");
+    expect(team?.columns.map((c) => c.name)).toEqual(["hs_path", "hs_name", "title"]);
+    expect(team?.draftColumns.map((c) => c.name)).toEqual(["title"]);
+    expect(snapshot.tables.find((t) => t.id === "2")?.columns.map((c) => c.name)).toEqual(["slug"]);
+  });
+
   it("handles the empty-portal case", async () => {
     const snapshot = await fetchPortalSchema(
       fakeClient({ onList: () => ({ results: [] }), onGetDraft: () => { throw new Error("nope"); } }),

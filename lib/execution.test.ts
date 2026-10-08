@@ -316,7 +316,7 @@ describe("synthesizeExecution — cell-length caps", () => {
 });
 
 describe("synthesizeExecution — hs_path", () => {
-  const t = table("pages", "T1", [{ name: "slug", type: "TEXT" }]);
+  const t: HubdbTable = { ...table("pages", "T1", [{ name: "slug", type: "TEXT" }]), useForPages: true };
   const base: MappingState = {
     ...initialMappingState(),
     targetTableName: "pages",
@@ -357,6 +357,75 @@ describe("synthesizeExecution — hs_path", () => {
     });
     expect(syn.issues).toEqual([]);
     expect(syn.schema?.tables[0]?.name).toBe("pages");
+  });
+
+  it("copies the picker column into hs_path alongside its own mapping", () => {
+    const syn = synthesizeExecution({
+      sources: [{ name: "pages", rows: [{ slug: "about-us" }] }],
+      mappings: { pages: base },
+      portalTables: [t],
+    });
+    expect(syn.schema?.tables[0]?.columns.map((c) => c.name)).toEqual(["slug", "hs_path"]);
+    expect(syn.source["pages"][0]).toEqual({ slug: "about-us", hs_path: "about-us" });
+  });
+
+  it("ignores the picker on a non-page target", () => {
+    const syn = synthesizeExecution({
+      sources: [{ name: "pages", rows: [{ slug: "About Us" }] }],
+      mappings: { pages: base },
+      portalTables: [{ ...t, useForPages: false }],
+    });
+    expect(syn.issues).toEqual([]);
+    expect(syn.source["pages"][0]).toEqual({ slug: "About Us" });
+  });
+
+  // A HubSpot export's own hs_path column, mapped straight to the
+  // pseudo-column (the portal snapshot lists it for page tables) and used
+  // as the natural key so a re-import matches existing team members.
+  it("maps a source column straight to hs_path and uses it as the natural key", () => {
+    const team: HubdbTable = {
+      ...table("team", "T9", [
+        { name: "hs_path", type: "TEXT" },
+        { name: "hs_name", type: "TEXT" },
+        { name: "title", type: "TEXT" },
+      ]),
+      useForPages: true,
+    };
+    const mapping: MappingState = {
+      ...initialMappingState(),
+      targetTableName: "team",
+      columnMap: {
+        hs_path: { kind: "mapped", targetColumn: "hs_path" },
+        Name: { kind: "mapped", targetColumn: "hs_name" },
+        Title: { kind: "mapped", targetColumn: "title" },
+      },
+      naturalKey: ["hs_path"],
+    };
+    const syn = synthesizeExecution({
+      sources: [{ name: "team", rows: [{ hs_path: "jane-doe", Name: "Jane Doe", Title: "Advisor" }] }],
+      mappings: { team: mapping },
+      portalTables: [team],
+    });
+    expect(syn.issues).toEqual([]);
+    expect(syn.schema?.tables[0]?.naturalKey).toBe("hs_path");
+    expect(syn.source["team"][0]).toEqual({ hs_path: "jane-doe", hs_name: "Jane Doe", title: "Advisor" });
+  });
+
+  it("validates a directly mapped hs_path column", () => {
+    const team: HubdbTable = { ...table("team", "T9", [{ name: "hs_path", type: "TEXT" }]), useForPages: true };
+    const syn = synthesizeExecution({
+      sources: [{ name: "team", rows: [{ path: "Jane-Doe" }] }],
+      mappings: {
+        team: {
+          ...initialMappingState(),
+          targetTableName: "team",
+          columnMap: { path: { kind: "mapped", targetColumn: "hs_path" } },
+          naturalKey: ["path"],
+        },
+      },
+      portalTables: [team],
+    });
+    expect(syn.issues.find((i) => i.kind === "page-path-invalid")?.column).toBe("path");
   });
 });
 

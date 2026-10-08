@@ -146,12 +146,27 @@ export interface MappingState {
   targetTableId?: string | null;
   columnMap: ColumnMap;
   naturalKey: string[];
+  // "Copy into page title / path" pickers: a source column (usually one
+  // already mapped elsewhere, e.g. `slug`) whose value also becomes the
+  // row's hs_name / hs_path. A column mapped straight to the hs_name /
+  // hs_path pseudo-column in `columnMap` wins — see pageFieldSource.
   hsName: string | null;
   hsPath: string | null;
   foreignKeys: Record<string, ForeignKeyConfig>;
   // Keyed by SOURCE column. Optional so profiles saved before image
   // uploads existed load unchanged (and default to uploading).
   imageUploads?: Record<string, ImageUploadConfig>;
+}
+
+/**
+ * The source column feeding a page table's hs_path / hs_name: the column
+ * mapped straight to that pseudo-column, else the copy-from picker.
+ */
+export function pageFieldSource(mapping: MappingState, field: "hs_path" | "hs_name"): string | null {
+  for (const [sourceCol, a] of Object.entries(mapping.columnMap)) {
+    if (a.kind === "mapped" && a.targetColumn === field) return sourceCol;
+  }
+  return (field === "hs_path" ? mapping.hsPath : mapping.hsName) ?? null;
 }
 
 export function initialMappingState(): MappingState {

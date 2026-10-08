@@ -3,10 +3,12 @@ import type { HubdbTable, FkColumnOption } from "./hubdb";
 import {
   type ForeignKeyConfig,
   type MappingState,
+  pageFieldSource,
   resolveImageUpload,
   validatePathColumn,
   type PathValidationIssue,
 } from "./mapping";
+import { PAGE_NAME, PAGE_PATH } from "./hubdb/page-fields";
 import type { Schema, SchemaColumn, SchemaTable } from "./schema";
 import { HUBDB_RICHTEXT_MAX, HUBDB_TEXT_MAX } from "./source/validate";
 
@@ -281,6 +283,19 @@ export function synthesizeExecution(input: ExecutionSynthesisInput): ExecutionSy
     }
     if (synthFailed) continue;
 
+    // Page tables: a copy-from picker feeds hs_path / hs_name from a source
+    // column that's mapped elsewhere (claim-once means it can't also be
+    // mapped to the pseudo-column). Direct mappings were handled above.
+    const pageCopies: Array<{ target: string; sourceCol: string }> = [];
+    if (target.useForPages) {
+      for (const field of [PAGE_PATH, PAGE_NAME] as const) {
+        const sourceCol = pageFieldSource(mapping, field);
+        if (!sourceCol || columns.some((c) => c.name === field)) continue;
+        columns.push({ name: field, type: "TEXT" });
+        pageCopies.push({ target: field, sourceCol });
+      }
+    }
+
     for (const nkCol of targetNkCols) {
       if (!columns.some((c) => c.name === nkCol)) {
         issues.push({
@@ -337,17 +352,18 @@ export function synthesizeExecution(input: ExecutionSynthesisInput): ExecutionSy
       continue;
     }
 
-    // hs_path lowercase + URL-safe + uniqueness check. mapping.hsPath
-    // holds the source column name mapped to the page-path role. The
-    // MappingEditor already runs this client-side; we run it again
-    // server-side so a stale client can't slip through.
-    if (mapping.hsPath) {
-      const pathIssues = validatePathColumn(s.rows, mapping.hsPath);
+    // hs_path lowercase + URL-safe + uniqueness check on whichever source
+    // column feeds the page path. The MappingEditor already runs this
+    // client-side; we run it again server-side so a stale client can't
+    // slip through.
+    const pathSource = target.useForPages ? pageFieldSource(mapping, PAGE_PATH) : null;
+    if (pathSource) {
+      const pathIssues = validatePathColumn(s.rows, pathSource);
       if (pathIssues.length > 0) {
         issues.push({
           kind: "page-path-invalid",
           source: s.name,
-          column: mapping.hsPath,
+          column: pathSource,
           issues: pathIssues,
         });
         continue;
@@ -383,6 +399,10 @@ export function synthesizeExecution(input: ExecutionSynthesisInput): ExecutionSy
         if (assignment.kind !== "mapped") continue;
         const v = row[sourceCol];
         if (v !== undefined) out[assignment.targetColumn] = v;
+      }
+      for (const { target: field, sourceCol } of pageCopies) {
+        const v = row[sourceCol];
+        if (v !== undefined) out[field] = v;
       }
       transformed.push(out);
     }

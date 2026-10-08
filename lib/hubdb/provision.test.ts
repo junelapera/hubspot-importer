@@ -170,6 +170,26 @@ describe("provision", () => {
     expect(result.tableIds).toEqual({ brands: "10", products: "20" });
   });
 
+  it("never sends the hs_path / hs_name pseudo-columns in a PATCH", async () => {
+    const portalBrands: HubdbTable = {
+      id: "10",
+      name: "brands",
+      label: "Brands",
+      published: true,
+      useForPages: true,
+      columns: [
+        { id: "hs_path", name: "hs_path", type: "TEXT" },
+        { id: "hs_name", name: "hs_name", type: "TEXT" },
+        { id: "1", name: "name", type: "TEXT" },
+      ],
+    };
+    const ops = fakeOps([portalBrands]);
+    const plan = planFromSchema({ version: 1, tables: [BRANDS_PRODUCTS.tables[0]] }, [portalBrands]);
+    await provision(ops, plan);
+    expect(ops.patchCalls).toHaveLength(1);
+    expect(ops.patchCalls[0].patch.columns?.map((c) => c.name)).toEqual(["name", "slug"]);
+  });
+
   it("does not emit a PATCH when an update has zero addColumns (nothing to do)", async () => {
     const portal: HubdbTable = {
       id: "10",

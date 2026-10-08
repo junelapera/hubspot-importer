@@ -17,6 +17,7 @@ import {
   detectTypeMismatch,
   initialForeignKeyConfig,
   initialMappingState as initialMappingStateLib,
+  pageFieldSource,
   resolveImageUpload,
   validatePathColumn,
   type ColumnAssignment,
@@ -154,9 +155,10 @@ export function MappingEditor({
     [source, value.naturalKey, requiredColumns],
   );
 
+  const pathSource = target?.useForPages ? pageFieldSource(value, "hs_path") : null;
   const pathIssues = useMemo(
-    () => (value.hsPath ? validatePathColumn(source.rows, value.hsPath) : []),
-    [source.rows, value.hsPath],
+    () => (pathSource ? validatePathColumn(source.rows, pathSource) : []),
+    [source.rows, pathSource],
   );
 
   return (
@@ -200,19 +202,19 @@ export function MappingEditor({
 
         {target?.useForPages ? (
           <div className="grid grid-cols-2 gap-2">
-            <SelectField
-              label="hs_name column"
-              hint="Row label in the HubDB UI"
-              value={value.hsName ?? ""}
+            <PageFieldPicker
+              field="hs_name"
+              label="Page title (hs_name)"
+              value={value}
+              headers={source.headers}
               onChange={(v) => onChange({ ...value, hsName: v || null })}
-              options={mappedSourceColumns(source.headers, value.columnMap)}
             />
-            <SelectField
-              label="hs_path column"
-              hint="Dynamic-page URL slug"
-              value={value.hsPath ?? ""}
+            <PageFieldPicker
+              field="hs_path"
+              label="Page path (hs_path)"
+              value={value}
+              headers={source.headers}
               onChange={(v) => onChange({ ...value, hsPath: v || null })}
-              options={mappedSourceColumns(source.headers, value.columnMap)}
             />
           </div>
         ) : null}
@@ -378,7 +380,7 @@ export function MappingEditor({
               target={target}
               sourceHeaders={source.headers}
             />
-            <WarningsPanel warnings={liveWarnings} pathIssues={pathIssues} hsPath={value.hsPath} />
+            <WarningsPanel warnings={liveWarnings} pathIssues={pathIssues} hsPath={pathSource} />
           </div>
         </>
       ) : (
@@ -669,6 +671,47 @@ function AssignmentSelect({
 
 const NONE_SENTINEL = "__none__";
 
+// hs_path / hs_name are mappable pseudo-columns in the table above (that's
+// the route for a HubSpot export's own hs_path column, and the only way to
+// use it as a natural key). This picker covers the other case: copying a
+// column that's already mapped elsewhere, e.g. `slug`, into the page path.
+function PageFieldPicker({
+  field,
+  label,
+  value,
+  headers,
+  onChange,
+}: {
+  field: "hs_path" | "hs_name";
+  label: string;
+  value: MappingState;
+  headers: string[];
+  onChange: (v: string) => void;
+}) {
+  const direct = Object.entries(value.columnMap).find(
+    ([, a]) => a.kind === "mapped" && a.targetColumn === field,
+  )?.[0];
+  if (direct) {
+    return (
+      <div className="flex flex-col gap-1 text-sm">
+        <span className="font-medium">{label}</span>
+        <span className="flex h-9 items-center text-xs text-muted-foreground">
+          from <code className="mx-1 rounded bg-muted px-1">{direct}</code> (mapped below)
+        </span>
+      </div>
+    );
+  }
+  return (
+    <SelectField
+      label={label}
+      hint={field === "hs_path" ? "Copy from a mapped column — dynamic-page URL slug" : "Copy from a mapped column — row label in the HubDB UI"}
+      value={(field === "hs_path" ? value.hsPath : value.hsName) ?? ""}
+      onChange={onChange}
+      options={mappedSourceColumns(headers, value.columnMap)}
+    />
+  );
+}
+
 function SelectField({
   label,
   hint,
@@ -754,7 +797,8 @@ function MappingSummary({
       </p>
       {target.useForPages ? (
         <p className="text-muted-foreground">
-          Page fields · hs_name={value.hsName ?? "—"} · hs_path={value.hsPath ?? "—"}
+          Page fields · hs_name={pageFieldSource(value, "hs_name") ?? "—"} · hs_path=
+          {pageFieldSource(value, "hs_path") ?? "—"}
         </p>
       ) : null}
     </div>

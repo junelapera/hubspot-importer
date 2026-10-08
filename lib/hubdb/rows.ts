@@ -1,14 +1,18 @@
 import type { HubdbClient } from "./client";
 import type { HubdbPage, HubdbRow, HubdbRowInput, HubdbRowUpdate } from "./types";
 import type { TableRef } from "./tables";
+import { liftPageValues, withPageValues } from "./page-fields";
 
 export const HUBDB_MAX_BATCH_SIZE = 100;
 export const HUBDB_DEFAULT_READ_PAGE_SIZE = 1000;
 
 type RawRow = Omit<HubdbRow, "id"> & { id: string | number };
 
+// Page tables' row-level path / name are folded into values.hs_path /
+// values.hs_name on every read and lifted back out on every write — see
+// ./page-fields.
 function normalizeRow(r: RawRow): HubdbRow {
-  return { ...r, id: String(r.id) };
+  return withPageValues({ ...r, id: String(r.id) });
 }
 
 function assertBatchSize(inputs: readonly unknown[]) {
@@ -98,7 +102,7 @@ export async function batchCreateDraftRows(
   assertBatchSize(rows);
   const res = await client.request<{ results: RawRow[] }>(
     `/tables/${encodeURIComponent(ref)}/rows/draft/batch/create`,
-    { method: "POST", body: { inputs: rows } },
+    { method: "POST", body: { inputs: rows.map(liftPageValues) } },
   );
   return (res.results ?? []).map(normalizeRow);
 }
@@ -111,7 +115,7 @@ export async function batchUpdateDraftRows(
   assertBatchSize(rows);
   const res = await client.request<{ results: RawRow[] }>(
     `/tables/${encodeURIComponent(ref)}/rows/draft/batch/update`,
-    { method: "POST", body: { inputs: rows } },
+    { method: "POST", body: { inputs: rows.map(liftPageValues) } },
   );
   return (res.results ?? []).map(normalizeRow);
 }
