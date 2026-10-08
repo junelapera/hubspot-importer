@@ -362,10 +362,14 @@ export const executeImport = inngest.createFunction(
           // Look the table id up fresh in the portal snapshot so a
           // schema-planner add between enqueue and publish doesn't
           // trip us.
+          // `order` holds SOURCE names (sheet tabs); the HubDB table is
+          // the mapping's target, which only matches when they're named
+          // alike.
+          const targetName = job.inputMappings?.[name]?.targetTableName ?? name;
           const snapshot = await fetchPortalSchema(client);
-          const target = snapshot.tables.find((t) => t.name === name);
+          const target = snapshot.tables.find((t) => t.name === targetName);
           if (!target) {
-            return { table: name, error: `table ${name} not found in portal` };
+            return { table: name, error: `table ${targetName} not found in portal` };
           }
           try {
             const t = await pushLive(client, target.id);

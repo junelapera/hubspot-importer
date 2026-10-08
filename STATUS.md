@@ -33,6 +33,14 @@ Running log of where the HubDB Importer project is, what's in flight, and what's
 - Local execution needs **both** `pnpm dev` and `pnpm dev:inngest` — without the latter, Execute fails with `enqueue failed: fetch failed`
 - A throwaway probe folder `/zz-hubdb-importer-probe` (3 copies of one headshot) is on the client portal; the token has no `files.delete` scope, so it needs a manual delete in the File Manager
 
+**Page path / title as columns** (`lib/hubdb/page-fields.ts`): page tables' row-level `path` / `name` show up as `hs_path` / `hs_name` pseudo-columns — mappable, usable as the natural key, folded in on read and lifted out on write. Before this the `hs_path` picker only validated and never wrote the path, and re-imports couldn't match existing rows by path. The copy-from pickers stay for the `slug`-also-becomes-path case. Verified live with spike 16 (re-import matched on `hs_path`, 0 created / 2 updated)
+
+**Publish used source names** (`lib/inngest/functions/execute-import.ts`): the publish step looked tables up by the sheet-tab name (`Advisors`) instead of the mapping's target (`team_members`) — only worked when they matched. Now resolves via `inputMappings[name].targetTableName`
+
+**Meta description is a regular column**, not a row field like hs_path / hs_name: the table's `dynamicMetaTags: {DESCRIPTION: <columnId>}` (also `FEATURED_IMAGE_URL`, `LINK_REL_CANONICAL_URL`) points at it, and `hs_meta_description` in values 400s. Prime's tables already have `meta_description` wired, so it maps like any column
+
+**Watch out — changed page paths duplicate rows.** Keying on `hs_path` when the sheet's paths differ from the portal's (Prime: `spanish-fort-al` → `financial-advisor-in-spanish-fort-al`) creates every row fresh. Hit this on 2026-10-08; the duplicates were purged and both tables emptied for a clean re-import. Worth a dry-run warning when a table with existing rows projects mostly creates
+
 **Next up:**
 - Block execute (not just warn) when a source has duplicate natural keys — today both rows insert and the *next* import preflight-fails on the duplicates
 - Add Department-style dropdowns to inference (SELECT detection from a small distinct-value set) — currently always TEXT
