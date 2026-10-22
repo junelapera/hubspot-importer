@@ -27,6 +27,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { TutorialPanel, TutorialSteps, TutorialTip } from "@/components/ui/tutorial-panel";
+import { Chevron, withChevrons } from "@/components/ui/chevron";
 
 type ParsedTable = {
   name: string;
@@ -440,7 +441,7 @@ export function SourceUploader({ portals }: { portals: PortalSummary[] }) {
       ) : null}
 
       <section className="space-y-3">
-        <h2 className="text-sm font-semibold">Target portal</h2>
+        <h2 className="eyebrow">Target portal</h2>
         <Select
           value={portalId}
           onValueChange={(v) => setPortalId(v ?? "")}
@@ -507,8 +508,8 @@ export function SourceUploader({ portals }: { portals: PortalSummary[] }) {
                   below is one record.
                 </li>
                 <li>
-                  Save each table as its own CSV file: <em>File → Save As</em> (Excel/Numbers) or{" "}
-                  <em>File → Download → CSV</em> (Google Sheets).
+                  Save each table as its own CSV file: <em>File <Chevron /> Save As</em> (Excel/Numbers) or{" "}
+                  <em>File <Chevron /> Download <Chevron /> CSV</em> (Google Sheets).
                 </li>
                 <li>
                   Name each file after the HubDB table it represents (e.g.{" "}
@@ -585,7 +586,7 @@ export function SourceUploader({ portals }: { portals: PortalSummary[] }) {
               </Button>
               {state.kind === "error" ? (
                 <p className="text-sm text-destructive">
-                  {state.message}
+                  {withChevrons(state.message)}
                   {state.extra ? ` (${state.extra})` : ""}
                 </p>
               ) : null}
@@ -612,7 +613,7 @@ export function SourceUploader({ portals }: { portals: PortalSummary[] }) {
                   <code className="rounded bg-muted px-1 text-xs">products</code>).
                 </li>
                 <li>
-                  Save as <em>.xlsx</em>. In Google Sheets: <em>File → Download → Microsoft Excel</em>.
+                  Save as <em>.xlsx</em>. In Google Sheets: <em>File <Chevron /> Download <Chevron /> Microsoft Excel</em>.
                 </li>
                 <li>Upload the file below and click <em>Parse XLSX</em>.</li>
               </TutorialSteps>
@@ -671,7 +672,7 @@ export function SourceUploader({ portals }: { portals: PortalSummary[] }) {
               </Button>
               {state.kind === "error" ? (
                 <p className="text-sm text-destructive">
-                  {state.message}
+                  {withChevrons(state.message)}
                   {state.extra ? ` (${state.extra})` : ""}
                 </p>
               ) : null}
@@ -688,7 +689,7 @@ export function SourceUploader({ portals }: { portals: PortalSummary[] }) {
               <TutorialSteps>
                 <li>Open your Google Sheet in a browser.</li>
                 <li>
-                  Menu: <em>File → Share → Publish to web</em>.
+                  Menu: <em>File <Chevron /> Share <Chevron /> Publish to web</em>.
                 </li>
                 <li>
                   In the dialog, use the <strong>left dropdown</strong> to pick a specific sheet tab
@@ -779,7 +780,7 @@ export function SourceUploader({ portals }: { portals: PortalSummary[] }) {
               </Button>
               {state.kind === "error" ? (
                 <p className="text-sm text-destructive">
-                  {state.message}
+                  {withChevrons(state.message)}
                   {state.extra ? ` (${state.extra})` : ""}
                 </p>
               ) : null}
@@ -841,7 +842,7 @@ export function SourceUploader({ portals }: { portals: PortalSummary[] }) {
               </Button>
               {state.kind === "error" ? (
                 <p className="text-sm text-destructive">
-                  {state.message}
+                  {withChevrons(state.message)}
                   {state.extra ? ` (${state.extra})` : ""}
                 </p>
               ) : null}
@@ -1078,7 +1079,7 @@ function Results({
   return (
     <section className="space-y-6">
       <div className="flex items-center justify-between">
-        <h2 className="text-sm font-semibold">Parsed tables ({response.tables.length})</h2>
+        <h2 className="eyebrow">Parsed tables ({response.tables.length})</h2>
         {response.warnings && response.warnings.length > 0 ? (
           <span className="text-xs text-muted-foreground">{response.warnings.length} top-level notice(s)</span>
         ) : null}
@@ -1216,7 +1217,7 @@ function TableCard({ table }: { table: ParsedTable }) {
           ))}
           {table.validationWarnings.map((w, i) => (
             <li key={`v-${i}`} className="text-yellow-800 dark:text-yellow-200">
-              <span className="font-mono uppercase tracking-wider">{w.kind}</span> — {w.message}
+              <span className="font-mono uppercase tracking-wider">{w.kind}</span> — {withChevrons(w.message)}
             </li>
           ))}
         </ul>

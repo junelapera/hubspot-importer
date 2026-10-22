@@ -9,7 +9,9 @@
   --color-foreground: var(--foreground);
   --font-sans: var(--font-hanken-sans);
   --font-mono: var(--font-jetbrains-mono);
-  --font-heading: var(--font-fraunces);
+  /* New Spirit Condensed is Salted Stone's Adobe Fonts face; it loads only if
+     the kit allows this domain. Fraunces is the free stand-in. */
+  --font-heading: new-spirit-condensed, var(--font-fraunces), Georgia, serif;
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
@@ -75,38 +77,46 @@
   --color-brand-cream: #d4cdba;
   --color-brand-offwhite: #f1ece1;
   --color-brand-slate: #7c8c8a;
+  /* From hubspot-site-auditor: card surface + contrast-safe error text. */
+  --color-brand-paper: #fbf9f4;
+  --color-brand-rust: #a8341a;
 
-  /* shadcn tokens mapped onto the brand palette. */
+  /* shadcn tokens mapped onto the brand palette. Same look as
+     hubspot-site-auditor: cream page, paper cards, flat ink lines.
+     Contrast (WCAG AA): ink on every brand fill >= 5.09:1, so text on
+     ochre/yellow/etc. is always ink. Brand red fails as text on cream
+     (3.6:1) — destructive uses rust. Muted text is ink at ~70% (5.2:1).
+     Focus rings are ink: ochre is under 3:1 against cream. */
   --background: var(--color-brand-offwhite);
   --foreground: var(--color-brand-forest);
-  --card: #f8f4ea;                    /* one shade lighter than offwhite */
+  --card: var(--color-brand-paper);
   --card-foreground: var(--color-brand-forest);
-  --popover: #f8f4ea;
+  --popover: var(--color-brand-paper);
   --popover-foreground: var(--color-brand-forest);
   --primary: var(--color-brand-ochre);
-  --primary-foreground: var(--color-brand-forest);  /* site pairs ochre with forest text */
-  --secondary: var(--color-brand-coffee);
-  --secondary-foreground: var(--color-brand-offwhite);
+  --primary-foreground: var(--color-brand-forest);
+  --secondary: var(--color-brand-paper);
+  --secondary-foreground: var(--color-brand-forest);
   --muted: var(--color-brand-cream);
-  --muted-foreground: #4a5652;        /* forest lightened for readable secondary text */
+  --muted-foreground: #5c635b;        /* ink 70% over cream, opaque */
   --accent: var(--color-brand-yellow);
   --accent-foreground: var(--color-brand-forest);
-  --destructive: var(--color-brand-red);
-  --border: #a89e82;                  /* sand darkened for stronger form-control edge */
-  --input: #a89e82;                   /* same as border — inputs need to read as bordered */
-  --field: #ffffff;                   /* pure white — strong contrast vs. cream page/card */
-  --ring: var(--color-brand-ochre);
+  --destructive: var(--color-brand-rust);
+  --border: var(--color-brand-forest);
+  --input: var(--color-brand-forest);
+  --field: var(--color-brand-paper);
+  --ring: var(--color-brand-forest);
   --chart-1: var(--color-brand-ochre);
   --chart-2: var(--color-brand-coffee);
   --chart-3: var(--color-brand-purple);
   --chart-4: var(--color-brand-olive);
   --chart-5: var(--color-brand-burgundy);
-  --radius: 0.3125rem;                /* site's rectangular surfaces use 5px */
-  --sidebar: var(--color-brand-ochre); /* matches the site's ochre header bar */
+  --radius: 0.5rem;                   /* inputs 8px (lg), cards ~11px (xl) */
+  --sidebar: var(--color-brand-offwhite);
   --sidebar-foreground: var(--color-brand-forest);
   --sidebar-primary: var(--color-brand-ochre);
-  --sidebar-primary-foreground: var(--color-brand-offwhite);
-  --sidebar-accent: var(--color-brand-cream);
+  --sidebar-primary-foreground: var(--color-brand-forest);
+  --sidebar-accent: var(--color-brand-paper);
   --sidebar-accent-foreground: var(--color-brand-forest);
   --sidebar-border: var(--color-brand-forest);
   --sidebar-ring: var(--color-brand-forest);
@@ -158,16 +168,11 @@
     @apply font-sans;
     scroll-behavior: smooth;
   }
-  /* saltedstone.com: h1/h2 in a condensed display serif, tight tracking,
-     forest on offwhite. Size + weight still come from utilities. */
-  h1,
-  h2 {
-    font-family: var(--font-heading);
-    font-variation-settings: "SOFT" 100;
-    letter-spacing: -0.01em;
-  }
+  /* Page titles in the display serif (size + weight from utilities).
+     Section headings are mono eyebrows, as in hubspot-site-auditor. */
   h1 {
-    letter-spacing: -0.02em;
+    font-family: var(--font-heading);
+    letter-spacing: -0.025em;
   }
   ::selection {
     background-color: var(--color-brand-yellow);
@@ -213,7 +218,17 @@
   font-family: var(--font-mono);
   font-size: 0.75rem;
   font-weight: 700;
-  letter-spacing: 0.05em;
+  letter-spacing: 0.1em;
   line-height: 1.5;
   text-transform: uppercase;
+}
+
+/* Every page's <main> under the header: same width + gutter as the header
+   container (app/nav.tsx), as in hubspot-site-auditor. Auth pages keep
+   their own narrow centered card. */
+@utility page {
+  margin-inline: auto;
+  width: 100%;
+  max-width: var(--container-6xl);
+  padding: --spacing(12) --spacing(6);
 }

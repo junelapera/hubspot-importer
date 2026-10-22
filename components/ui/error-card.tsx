@@ -1,4 +1,5 @@
 import { friendlyError } from "@/lib/error-copy";
+import { withChevrons } from "@/components/ui/chevron";
 
 export function ErrorCard({
   error,
@@ -15,11 +16,11 @@ export function ErrorCard({
       className={`space-y-2 rounded-md border border-destructive/30 bg-destructive/10 p-4 text-sm ${className}`}
     >
       <p className="font-semibold text-destructive">{title}</p>
-      {detail ? <p className="text-destructive/90">{detail}</p> : null}
+      {detail ? <p className="text-destructive/90">{withChevrons(detail)}</p> : null}
       {hint ? (
         <p className="text-sm text-foreground">
           <span className="font-medium">Fix: </span>
-          {hint}
+          {withChevrons(hint)}
         </p>
       ) : null}
       {!showRawInline ? null : (

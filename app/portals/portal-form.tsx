@@ -10,6 +10,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { withChevrons } from "@/components/ui/chevron";
 
 type SubmitState =
   | { kind: "idle" }
@@ -110,7 +111,7 @@ export function PortalForm() {
           {state.kind === "submitting" ? "Validating…" : "Add portal"}
         </Button>
         {state.kind === "error" ? (
-          <p className="text-sm text-destructive">{state.message}</p>
+          <p className="text-sm text-destructive">{withChevrons(state.message)}</p>
         ) : null}
         {state.kind === "success" ? (
           <p className="text-sm text-muted-foreground">Added {state.label}.</p>

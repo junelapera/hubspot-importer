@@ -18,6 +18,7 @@ import {
   type InferredColumnType,
   type InferredTable,
 } from "@/lib/schema-infer";
+import { Chevron } from "@/components/ui/chevron";
 
 const TYPES: readonly InferredColumnType[] = [
   "TEXT",
@@ -112,7 +113,7 @@ export function SchemaInferPanel({ sources }: { sources: readonly Source[] }) {
     <section className="space-y-3 rounded-md border border-border p-4">
       <header className="flex flex-wrap items-baseline justify-between gap-2">
         <div className="space-y-1">
-          <h2 className="text-sm font-semibold">Suggest a schema</h2>
+          <h2 className="eyebrow">Suggest a schema</h2>
           <p className="text-xs text-muted-foreground">
             Inferred from your uploads — override types below, then download{" "}
             <code className="rounded bg-muted px-1 font-mono text-[11px]">schema.json</code>{" "}
@@ -263,7 +264,7 @@ function ColumnRow({
         <div>{column.name}</div>
         {hubdbName !== column.name ? (
           <div className="font-mono text-[10px] text-muted-foreground" title="HubDB column name (what HubL reads)">
-            → {hubdbName}
+            <Chevron /> {hubdbName}
           </div>
         ) : null}
       </td>

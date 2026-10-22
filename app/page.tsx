@@ -1,12 +1,12 @@
 import Link from "next/link";
-import { PAGE_ACCENTS, PageHeader } from "@/components/ui/page-header";
+import { ChevronRight } from "lucide-react";
+import { PageHeader } from "@/components/ui/page-header";
+import { Chevron } from "@/components/ui/chevron";
 
 export default function Home() {
   return (
-    <main className="mx-auto max-w-5xl px-6 py-12 space-y-10">
+    <main className="page space-y-10">
       <PageHeader
-        icon={PAGE_ACCENTS.home.icon}
-        accentColor={PAGE_ACCENTS.home.color}
         title="S2 HubDB Importer"
         description={
           <>
@@ -14,7 +14,7 @@ export default function Home() {
             <code className="rounded bg-muted px-1.5 py-0.5 text-sm">FOREIGN_ID</code>{" "}
             cells from natural keys so a{" "}
             <code className="rounded bg-muted px-1.5 py-0.5 text-sm">
-              products → brands + categories
+              products <Chevron /> brands + categories
             </code>{" "}
             dataset lands in one pass.
           </>
@@ -55,18 +55,6 @@ export default function Home() {
           ready
         />
       </nav>
-
-      <footer className="border-t-2 border-foreground pt-6 text-xs text-muted-foreground">
-        <a
-          href="https://github.com/junelapera/hubspot-importer"
-          className="underline underline-offset-2"
-        >
-          github.com/junelapera/hubspot-importer
-        </a>
-        {" · see "}
-        <code className="rounded bg-muted px-1 py-0.5">STATUS.md</code>
-        {" for phase progress"}
-      </footer>
     </main>
   );
 }
@@ -92,21 +80,21 @@ function SectionLink({
     <Wrapper
       href={href}
       className={
-        "group flex flex-col gap-3 rounded-md border-2 border-foreground bg-card p-5 transition-all " +
+        "group flex flex-col gap-3 rounded-xl border border-foreground bg-card p-5 transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring " +
         (disabled
           ? "cursor-not-allowed opacity-50"
-          : "hover:-translate-y-1 hover:bg-primary")
+          : "hover:bg-accent")
       }
     >
       <span className="eyebrow">
         {index} <span aria-hidden>✷</span> {tag}
         {disabled ? " · planned" : null}
       </span>
-      <h2 className="text-3xl font-medium leading-none">{title}</h2>
+      <h2 className="font-heading text-3xl font-medium leading-tight tracking-tight">{title}</h2>
       <span className="text-sm text-muted-foreground group-hover:text-foreground">{desc}</span>
       {disabled ? null : (
-        <span className="eyebrow mt-auto pt-2">
-          Open <span aria-hidden>→</span>
+        <span className="eyebrow mt-auto inline-flex items-center gap-1.5 pt-2">
+          Open <ChevronRight aria-hidden className="size-3.5" />
         </span>
       )}
     </Wrapper>

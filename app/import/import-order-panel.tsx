@@ -1,6 +1,7 @@
 "use client";
 
 import type { ImportOrderPlan } from "@/lib/mapping";
+import { joinWithChevrons } from "@/components/ui/chevron";
 
 export function ImportOrderPanel({ plan }: { plan: ImportOrderPlan }) {
   const nodeByName = new Map(plan.nodes.map((n) => [n.name, n]));
@@ -9,7 +10,7 @@ export function ImportOrderPanel({ plan }: { plan: ImportOrderPlan }) {
   return (
     <section className="space-y-3 rounded-md border border-border p-4">
       <header className="flex flex-wrap items-baseline gap-3">
-        <h2 className="text-sm font-semibold">Import order</h2>
+        <h2 className="eyebrow">Import order</h2>
         <span className="text-xs text-muted-foreground">
           Foreign tables first — determined by the FK config on each mapping.
         </span>
@@ -61,7 +62,7 @@ export function ImportOrderPanel({ plan }: { plan: ImportOrderPlan }) {
           <ul className="ml-4 list-disc">
             {plan.cycles.map((cycle, i) => (
               <li key={i}>
-                {cycle.join(" → ")} → <em>{cycle[0]}</em>
+                {joinWithChevrons([...cycle, <em key="start">{cycle[0]}</em>])}
               </li>
             ))}
           </ul>

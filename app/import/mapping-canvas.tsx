@@ -32,6 +32,7 @@ import {
 } from "@/lib/mapping";
 import type { SourceTable } from "./mapping-editor";
 import { Button } from "@/components/ui/button";
+import { Chevron, withChevrons } from "@/components/ui/chevron";
 
 const NODE_WIDTH = 260;
 
@@ -57,7 +58,7 @@ function TableNode({ data }: { data: TableNodeData }) {
       <header className="rounded-t-md border-b border-border bg-muted/60 px-3 py-2">
         <div className="font-semibold">{data.tableName}</div>
         {data.targetName ? (
-          <div className="text-muted-foreground">→ {data.targetName}</div>
+          <div className="text-muted-foreground"><Chevron /> {data.targetName}</div>
         ) : (
           <div className="italic text-muted-foreground">no target picked</div>
         )}
@@ -85,7 +86,7 @@ function TableNode({ data }: { data: TableNodeData }) {
             </span>
             <span className="flex shrink-0 items-center gap-1 text-[10px] text-muted-foreground">
               {c.mappedTarget && c.mappedTarget !== c.name ? (
-                <span className="truncate">→ {c.mappedTarget}</span>
+                <span className="truncate"><Chevron /> {c.mappedTarget}</span>
               ) : null}
               {c.hasFk ? (
                 <span className="rounded bg-primary/10 px-1 py-0.5 font-medium text-primary">
@@ -232,7 +233,7 @@ function MappingCanvasInner({
         setConnectNotice(
           `Neither "${raw.source}.${raw.sourceHandle}" nor "${raw.target}.${raw.targetHandle}" is mapped to a ` +
             "FOREIGN_ID column. Map the column that holds the references to a FOREIGN_ID column first, then connect it " +
-            "to the column it matches (e.g. Locations.Advisors → Advisors.Page Path).",
+            "to the column it matches (e.g. Locations.Advisors › Advisors.Page Path).",
         );
         return;
       }
@@ -242,7 +243,7 @@ function MappingCanvasInner({
           : { source: raw.source, sourceHandle: raw.sourceHandle, target: raw.target, targetHandle: raw.targetHandle };
       setConnectNotice(
         !fromFk && toFk
-          ? `Connected ${params.source}.${params.sourceHandle} → ${params.target}.${params.targetHandle} (reversed to start from the FOREIGN_ID column).`
+          ? `Connected ${params.source}.${params.sourceHandle} › ${params.target}.${params.targetHandle} (reversed to start from the FOREIGN_ID column).`
           : null,
       );
       const existing = mappings[params.source] ?? initialMappingState();
@@ -358,7 +359,7 @@ function MappingCanvasInner({
       </div>
       {connectNotice ? (
         <p className="rounded-md border border-yellow-500/30 bg-yellow-500/5 p-2 text-xs text-yellow-800 dark:text-yellow-200">
-          {connectNotice}
+          {withChevrons(connectNotice)}
         </p>
       ) : null}
       <div

@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { Fraunces, Hanken_Grotesk, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
-import { MobileNav, Sidebar } from "./nav";
+import { Footer, Header } from "./nav";
 import { getCurrentUser } from "@/lib/db/supabase-server-auth";
 
 const hankenSans = Hanken_Grotesk({
@@ -9,19 +9,19 @@ const hankenSans = Hanken_Grotesk({
   subsets: ["latin"],
 });
 
-// saltedstone.com sets headings in New Spirit Condensed (Adobe Fonts, kit is
-// domain-locked so it won't load here). Fraunces with the SOFT axis maxed is
-// the closest freely-licensed match: soft, slightly wonky display serif.
+// Stand-in for New Spirit Condensed (see --font-heading in globals.css).
+// Same setup as hubspot-site-auditor.
 const fraunces = Fraunces({
   variable: "--font-fraunces",
   subsets: ["latin"],
-  axes: ["SOFT", "opsz"],
+  weight: ["500", "600"],
 });
 
 // The site's "sub-font": eyebrows, buttons, nav labels, and code.
 const jetbrainsMono = JetBrains_Mono({
   variable: "--font-jetbrains-mono",
   subsets: ["latin"],
+  weight: ["400", "500", "700"],
 });
 
 export const metadata: Metadata = {
@@ -30,7 +30,7 @@ export const metadata: Metadata = {
 };
 
 export default async function RootLayout({ children }: LayoutProps<"/">) {
-  // Server-side session read for the sidebar's "signed in as" block.
+  // Server-side session read for the header's "signed in as" block.
   // Wrapped in try/catch because getCurrentUser throws when the auth env
   // vars aren't set (dev-mode fallback) — nav gracefully handles null.
   let userEmail: string | null = null;
@@ -45,12 +45,18 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
       lang="en"
       className={`${hankenSans.variable} ${fraunces.variable} ${jetbrainsMono.variable} h-full antialiased`}
     >
-      <body className="min-h-full flex">
-        <Sidebar userEmail={userEmail} />
-        <div className="flex min-h-screen flex-1 flex-col">
-          <MobileNav />
-          <div className="flex-1">{children}</div>
+      <body className="flex min-h-full flex-col">
+        <a
+          href="#main"
+          className="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-50 focus:rounded-full focus:border-2 focus:border-foreground focus:bg-accent focus:px-4 focus:py-2 focus:font-mono focus:text-xs focus:font-bold focus:uppercase"
+        >
+          Skip to content
+        </a>
+        <Header userEmail={userEmail} />
+        <div id="main" className="flex-1">
+          {children}
         </div>
+        <Footer />
       </body>
     </html>
   );

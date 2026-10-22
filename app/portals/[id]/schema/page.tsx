@@ -6,7 +6,7 @@ import type { HubdbColumn, PortalSchemaTable } from "@/lib/hubdb";
 import { DropTableButton } from "./drop-table-button";
 import { RefreshButton } from "./refresh-button";
 import { SchemaPlanner } from "./schema-planner";
-import { PAGE_ACCENTS, PageHeader } from "@/components/ui/page-header";
+import { PageHeader } from "@/components/ui/page-header";
 import { ErrorCard } from "@/components/ui/error-card";
 import { Breadcrumbs } from "@/components/ui/breadcrumbs";
 
@@ -35,7 +35,7 @@ export default async function PortalSchemaPage({ params }: Props) {
   }
 
   return (
-    <main className="mx-auto max-w-5xl px-6 py-12 space-y-8">
+    <main className="page space-y-8">
       <Breadcrumbs
         items={[
           { label: "Portals", href: "/portals" },
@@ -43,8 +43,6 @@ export default async function PortalSchemaPage({ params }: Props) {
         ]}
       />
       <PageHeader
-        icon={PAGE_ACCENTS.portals.icon}
-        accentColor={PAGE_ACCENTS.portals.color}
         title={portal.label}
         description="Draft schemas from the portal. Column lists reflect what a subsequent PATCH would see, not the currently published state."
       >

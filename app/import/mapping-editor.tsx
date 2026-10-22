@@ -33,6 +33,7 @@ export type MappingState = LibMappingState;
 export const initialMappingState = initialMappingStateLib;
 import type { Delimiter } from "@/lib/resolve";
 import { validateSource, type Warning } from "@/lib/source/validate";
+import { Chevron, withChevrons } from "@/components/ui/chevron";
 
 export interface SourceTable {
   name: string;
@@ -223,7 +224,7 @@ export function MappingEditor({
       {target ? (
         <>
           <p className="text-[10px] text-muted-foreground sm:hidden">
-            Scroll the table sideways to see all columns →
+            Scroll the table sideways to see all columns <Chevron />
           </p>
           <div className="overflow-x-auto rounded-md border border-border">
             <table className="w-full min-w-[640px] text-xs">
@@ -340,7 +341,7 @@ export function MappingEditor({
                           />
                           <span>
                             <span className="font-medium">
-                              Upload <code className="rounded bg-muted px-1">{sourceCol}</code> →{" "}
+                              Upload <code className="rounded bg-muted px-1">{sourceCol}</code> <Chevron />{" "}
                               <code className="rounded bg-muted px-1">{targetCol}</code> to the HubSpot File Manager
                             </span>
                             <span className="block text-xs text-muted-foreground">
@@ -425,7 +426,7 @@ function ForeignKeyPanel({
     <article className="space-y-3 rounded-md border border-border bg-background p-3 text-xs">
       <header className="flex flex-wrap items-baseline gap-2">
         <span className="font-semibold">
-          <code className="rounded bg-muted px-1">{sourceCol}</code> → <code className="rounded bg-muted px-1">{targetCol.name}</code>
+          <code className="rounded bg-muted px-1">{sourceCol}</code> <Chevron /> <code className="rounded bg-muted px-1">{targetCol.name}</code>
         </span>
         <span className="rounded-full border border-border bg-muted px-2 py-0.5 text-[10px] uppercase tracking-wider text-muted-foreground">
           FOREIGN_ID
@@ -826,7 +827,7 @@ function WarningsPanel({
     <ul className="space-y-1 rounded-md border border-yellow-500/30 bg-yellow-500/5 p-3 text-xs">
       {warnings.map((w, i) => (
         <li key={`w-${i}`} className="text-yellow-800 dark:text-yellow-200">
-          <span className="font-mono uppercase tracking-wider">{w.kind}</span> — {w.message}
+          <span className="font-mono uppercase tracking-wider">{w.kind}</span> — {withChevrons(w.message)}
         </li>
       ))}
       {hsPath ? (

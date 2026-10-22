@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import type { Conflict, DiffPlan, SchemaColumn, TableDiff } from "@/lib/schema";
 import type { ProvisionEvent, ProvisionResult } from "@/lib/hubdb";
 import { TutorialPanel, TutorialSteps, TutorialTip } from "@/components/ui/tutorial-panel";
+import { Chevron, joinWithChevrons, withChevrons } from "@/components/ui/chevron";
 
 type PlanResponse = {
   plan: DiffPlan;
@@ -219,7 +220,7 @@ export function SchemaPlanner({ portalId }: { portalId: string }) {
           </Button>
           {stage.kind === "error" ? (
             <div className="text-sm text-destructive">
-              <p>{stage.message}</p>
+              <p>{withChevrons(stage.message)}</p>
               {stage.issues && stage.issues.length > 0 ? (
                 <ul className="ml-4 list-disc text-xs">
                   {stage.issues.map((i, k) => <li key={k}>{i}</li>)}
@@ -300,7 +301,7 @@ function PlanView({
       {result?.result ? (
         <details className="rounded-md border border-border p-3 text-xs">
           <summary className="cursor-pointer font-medium">
-            Provisioning result — order {result.result.order.join(" → ")}
+            Provisioning result — order {joinWithChevrons(result.result.order)}
             {result.result.deferred.length > 0
               ? ` · ${result.result.deferred.length} deferred edge(s)`
               : ""}
@@ -311,7 +312,7 @@ function PlanView({
               <ul className="mt-1 space-y-0.5">
                 {Object.entries(result.result.tableIds).map(([name, id]) => (
                   <li key={name}>
-                    <code className="rounded bg-muted px-1">{name}</code> → <code className="rounded bg-muted px-1">{id}</code>
+                    <code className="rounded bg-muted px-1">{name}</code> <Chevron /> <code className="rounded bg-muted px-1">{id}</code>
                   </li>
                 ))}
               </ul>
@@ -360,7 +361,7 @@ function TableDiffCard({ diff }: { diff: TableDiff }) {
                   <code className="rounded bg-muted px-1">{c.name}</code>{" "}
                   <code className="rounded bg-muted px-1 text-[10px] uppercase">{c.type}</code>
                   {c.type === "FOREIGN_ID" && c.foreignTable ? (
-                    <> → {c.foreignTable}{c.foreignColumn ? `.${c.foreignColumn}` : ""}</>
+                    <> <Chevron /> {c.foreignTable}{c.foreignColumn ? `.${c.foreignColumn}` : ""}</>
                   ) : null}
                 </li>
               ))}

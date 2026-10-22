@@ -1,11 +1,12 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowRight } from "lucide-react";
+import { ChevronRight } from "lucide-react";
 import { getJobById, listJobErrors } from "@/lib/db/jobs";
 import { createSupabaseServerClient } from "@/lib/db/supabase";
 import { Breadcrumbs } from "@/components/ui/breadcrumbs";
 import { ErrorCard } from "@/components/ui/error-card";
 import { DeleteJobButton } from "./delete-job-button";
+import { withChevrons } from "@/components/ui/chevron";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -29,7 +30,7 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
   const durationMs = totals?.durationMs;
 
   return (
-    <main className="mx-auto max-w-5xl px-6 py-12 space-y-6">
+    <main className="page space-y-6">
       <Breadcrumbs
         items={[
           { label: "Jobs", href: "/jobs" },
@@ -78,13 +79,13 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
 
           {job.error ? (
             <p className="rounded-md border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">
-              {job.error}
+              {withChevrons(job.error)}
             </p>
           ) : null}
 
           {(job.status === "failed" || job.status === "cancelled") && job.portalId && job.mappingId ? (
             <section className="space-y-2 rounded-md border border-primary/40 bg-primary/5 p-4 text-sm">
-              <h2 className="text-sm font-semibold">Resume this run</h2>
+              <h2 className="eyebrow">Resume this run</h2>
               <p className="text-xs text-muted-foreground">
                 Reopens the wizard with this job&apos;s mapping profile pre-loaded. Re-upload
                 the same source files, then click <em>Execute</em> — the run continues on
@@ -96,14 +97,14 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
                 className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/80"
               >
                 Resume in wizard
-                <ArrowRight aria-hidden="true" className="size-4" />
+                <ChevronRight aria-hidden="true" className="size-4" />
               </Link>
             </section>
           ) : null}
 
           {totals ? (
             <section className="space-y-3">
-              <h2 className="text-sm font-semibold">
+              <h2 className="eyebrow">
                 Per-table totals · order:{" "}
                 {totals.order.map((n) => (
                   <code key={n} className="mr-1 rounded bg-muted px-1 text-xs">
@@ -161,7 +162,7 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
           ) : null}
 
           <section className="space-y-3">
-            <h2 className="text-sm font-semibold">Row errors ({errors.length})</h2>
+            <h2 className="eyebrow">Row errors ({errors.length})</h2>
             {errors.length === 0 ? (
               <p className="text-xs text-muted-foreground">No row-level errors were logged.</p>
             ) : (
@@ -191,7 +192,7 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
                             "—"
                           )}
                         </td>
-                        <td className="px-3 py-2">{e.detail}</td>
+                        <td className="px-3 py-2">{withChevrons(e.detail)}</td>
                       </tr>
                     ))}
                   </tbody>

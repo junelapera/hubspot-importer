@@ -2,147 +2,107 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import type { CSSProperties } from "react";
 import { LogoutButton } from "./logout-button";
 
 // Auth pages render standalone (no chrome) so the login/register cards
-// take the full viewport. Sidebar + MobileNav both bail early on these
-// pathnames.
+// take the full viewport.
 const AUTH_PATHS = new Set(["/login", "/register"]);
 
 type NavItem = {
   href: string;
   label: string;
-  icon: string;
   // A page belongs to a section if the pathname startsWith the href
   // (so /portals/[id]/schema highlights "Portals"). Home is exact-match.
   exact?: boolean;
 };
 
-// Chrome follows saltedstone.com's header: ochre bar, forest mono labels,
-// active item as an offwhite pill with a forest border (the site's
-// badge-button). Per-section accent colors live on PageHeader instead.
 const ITEMS: NavItem[] = [
-  { href: "/", label: "Home", icon: "/icons/laptop.svg", exact: true },
-  { href: "/portals", label: "Portals", icon: "/icons/compensation.svg" },
-  { href: "/import", label: "Import", icon: "/icons/hubspot-expertise.svg" },
-  { href: "/jobs", label: "Jobs", icon: "/icons/custom-solutions.svg" },
-  { href: "/docs", label: "Docs", icon: "/icons/team-building.svg" },
+  { href: "/", label: "Home", exact: true },
+  { href: "/portals", label: "Portals" },
+  { href: "/import", label: "Import" },
+  { href: "/jobs", label: "Jobs" },
+  { href: "/docs", label: "Docs" },
 ];
 
-const ITEM_BASE =
-  "flex items-center rounded-full border-2 font-mono font-bold uppercase tracking-[0.05em] transition-all";
-const ITEM_ACTIVE = "border-foreground bg-background text-foreground";
-const ITEM_IDLE =
-  "border-transparent text-foreground hover:border-foreground hover:bg-foreground hover:text-background";
-
-// CSS mask lets the flat-colored Saltedstone SVGs inherit `currentColor`
-// so the icon flips between forest / offwhite depending on active state,
-// with no per-mode filter juggling.
-function iconMaskStyle(src: string): CSSProperties {
-  return {
-    WebkitMaskImage: `url(${src})`,
-    maskImage: `url(${src})`,
-    WebkitMaskRepeat: "no-repeat",
-    maskRepeat: "no-repeat",
-    WebkitMaskPosition: "center",
-    maskPosition: "center",
-    WebkitMaskSize: "contain",
-    maskSize: "contain",
-  };
-}
+// Mono uppercase link, underlined on hover; the current section keeps a
+// heavier underline. Same treatment as hubspot-site-auditor's header.
+const LINK =
+  "rounded font-mono text-xs font-bold tracking-[0.08em] uppercase whitespace-nowrap underline-offset-4 hover:underline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-ring";
 
 function isActive(pathname: string, item: NavItem): boolean {
   if (item.exact) return pathname === item.href;
   return pathname === item.href || pathname.startsWith(`${item.href}/`);
 }
 
-export function Sidebar({ userEmail }: { userEmail?: string | null }) {
+// Top bar modeled on hubspot-site-auditor: cream, thin ink rule, wordmark +
+// app label, mono text links, signed-in email + sign-out on the right.
+// Under md the links drop to their own row.
+export function Header({ userEmail }: { userEmail?: string | null }) {
   const pathname = usePathname();
   if (AUTH_PATHS.has(pathname)) return null;
   return (
-    <aside
-      aria-label="Primary"
-      className="hidden md:flex md:w-60 md:flex-col md:border-r-2 md:border-sidebar-border md:bg-sidebar md:text-sidebar-foreground md:sticky md:top-0 md:h-screen md:shrink-0"
-    >
-      <div className="px-5 py-6 space-y-3 border-b-2 border-sidebar-border">
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
-          src="/saltedstone-logo.svg"
-          alt="Saltedstone"
-          className="h-6 w-auto dark:invert"
-        />
-        <p className="eyebrow">HubDB Importer</p>
-      </div>
-      <nav className="flex-1 overflow-y-auto p-3">
-        <ul className="space-y-1.5">
-          {ITEMS.map((item) => {
-            const active = isActive(pathname, item);
-            return (
-              <li key={item.href}>
-                <Link
-                  href={item.href}
-                  aria-current={active ? "page" : undefined}
-                  className={`${ITEM_BASE} gap-2.5 px-3 py-1.5 text-xs ${active ? ITEM_ACTIVE : ITEM_IDLE}`}
-                >
-                  <span
-                    aria-hidden
-                    className="size-5 bg-current shrink-0"
-                    style={iconMaskStyle(item.icon)}
-                  />
-                  <span>{item.label}</span>
-                </Link>
-              </li>
-            );
-          })}
-        </ul>
-      </nav>
-      {userEmail ? (
-        <div className="space-y-1 border-t-2 border-sidebar-border px-5 py-3 text-xs">
-          <p className="truncate font-medium" title={userEmail}>
-            {userEmail}
-          </p>
-          <LogoutButton className="text-foreground!" />
-        </div>
-      ) : null}
-      <div className="border-t-2 border-sidebar-border px-5 py-3 text-[11px]">
-        <a
-          href="https://github.com/junelapera/hubspot-importer"
-          className="underline-offset-2 hover:underline"
+    <header className="border-b border-foreground bg-background">
+      <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-x-6 gap-y-3 px-6 py-3">
+        <Link
+          href="/"
+          className="flex items-center gap-3 rounded focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-ring"
         >
-          github.com/junelapera/hubspot-importer
-        </a>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src="/saltedstone-logo.svg"
+            alt="Salted Stone"
+            width={110}
+            height={32}
+            className="h-8 w-auto dark:invert"
+          />
+          <span className="hidden border-l border-foreground pl-3 font-mono text-[11px] font-bold tracking-[0.08em] uppercase sm:inline">
+            HubDB Importer
+          </span>
+        </Link>
+        <nav
+          aria-label="Primary"
+          className="order-last w-full overflow-x-auto md:order-none md:w-auto md:flex-1"
+        >
+          <ul className="flex items-center gap-6">
+            {ITEMS.map((item) => {
+              const active = isActive(pathname, item);
+              return (
+                <li key={item.href}>
+                  <Link
+                    href={item.href}
+                    aria-current={active ? "page" : undefined}
+                    className={`${LINK} ${active ? "underline decoration-2" : ""}`}
+                  >
+                    {item.label}
+                  </Link>
+                </li>
+              );
+            })}
+          </ul>
+        </nav>
+        {userEmail ? (
+          <div className="flex items-center gap-3">
+            <span className="hidden max-w-56 truncate text-sm text-muted-foreground md:inline" title={userEmail}>
+              {userEmail}
+            </span>
+            <LogoutButton />
+          </div>
+        ) : null}
       </div>
-    </aside>
+    </header>
   );
 }
 
-export function MobileNav() {
+// Ink footer bar, as in hubspot-site-auditor. Same width as the header.
+export function Footer() {
   const pathname = usePathname();
   if (AUTH_PATHS.has(pathname)) return null;
   return (
-    <nav
-      aria-label="Primary"
-      className="md:hidden sticky top-0 z-10 flex items-center gap-1 overflow-x-auto border-b-2 border-sidebar-border bg-sidebar px-3 py-2"
-    >
-      {ITEMS.map((item) => {
-        const active = isActive(pathname, item);
-        return (
-          <Link
-            key={item.href}
-            href={item.href}
-            aria-current={active ? "page" : undefined}
-            className={`${ITEM_BASE} gap-1.5 px-2.5 py-1 text-[11px] whitespace-nowrap ${active ? ITEM_ACTIVE : ITEM_IDLE}`}
-          >
-            <span
-              aria-hidden
-              className="size-3.5 bg-current shrink-0"
-              style={iconMaskStyle(item.icon)}
-            />
-            <span>{item.label}</span>
-          </Link>
-        );
-      })}
-    </nav>
+    <footer className="bg-foreground text-background">
+      <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-2 px-6 py-5 font-mono text-[11px] font-bold tracking-[0.08em] uppercase">
+        <span>Salted Stone · HubDB Importer</span>
+        <span className="text-background/80">Relational imports into HubSpot HubDB</span>
+      </div>
+    </footer>
   );
 }

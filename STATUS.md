@@ -4,6 +4,21 @@ Running log of where the HubDB Importer project is, what's in flight, and what's
 
 ## Current state — 2026-10-22
 
+**Later the same day: restyled again to match hubspot-site-auditor**, then moved to its header layout. Supersedes parts of the saltedstone.com pass below (ochre sidebar, flip-to-forest buttons, per-section accent colors are all gone).
+
+- **Tokens** (`app/globals.css`): ported from `../hubspot-site-auditor/apps/web/src/app/globals.css`. Cream page, `--card`/`--field` = paper `#fbf9f4`, `--border`/`--input`/`--ring` = ink — flat 1px ink lines, ink focus outlines. Contrast pre-checked (WCAG AA): text on brand fills is always ink, `--destructive` = rust `#a8341a` (brand red is 3.6:1 on cream), `--muted-foreground` = `#5c635b` (ink ~70%, 5.2:1). `--radius` 0.5rem. `--font-heading` tries `new-spirit-condensed` before Fraunces
+- **Buttons**: the auditor's `.btn` — ink-bordered pill, ochre → yellow on hover, paper → cream for outline/secondary, rust for destructive. No lift / invert
+- **Layout**: left sidebar replaced by a top `Header` (`app/nav.tsx`) — wordmark at the auditor's 110×32 + mono "HubDB Importer" label, text-only mono nav links (underline = current page), email + Sign out pill on the right; links wrap to their own row under `md`. New ink `Footer`. "Skip to content" link in `app/layout.tsx`. Every `<main>` under the header uses a new `page` utility (`max-w-6xl px-6 py-12`) so content lines up with header + footer
+- **Page headers**: icons and per-section accent colors removed — `PageHeader` is now serif h1 + description + ink rule (`PAGE_ACCENTS` deleted; `public/icons/*.svg` now unused). Small card `h2`s converted to mono `eyebrow` labels (auditor's section-heading style); docs section h2s opt into the serif with `font-heading`
+- **No arrows**: `components/ui/chevron.tsx` — `<Chevron />` (lucide `ChevronRight` + sr-only `→`) for inline paths/mappings, `joinWithChevrons(items)` instead of `.join(" → ")`, and `withChevrons(text)` on every rendered message / error / row-detail so strings built in `lib/` (e.g. `HubSpot rejected: PATCH … → 400`) and ones already saved on `jobs` / `job_errors` rows show chevrons without changing what's stored or logged. `ArrowRight` icons → `ChevronRight`
+- **Removed**: GitHub link + "see STATUS.md" footer on Home and in the sidebar
+
+**Known, not fixed:** `/docs` walkthrough has a `<ul>` inside a `<p>` (React hydration warning in the dev log; predates this work). Raw Tailwind status colors (`text-yellow-800`, `text-emerald-700`, …) haven't been contrast-checked against the new tokens.
+
+---
+
+**Earlier — saltedstone.com pass:**
+
 **UI restyled to match saltedstone.com** (`40039ad`). The brand palette already matched the site's CSS exactly (`template_theme-overrides.min.css` `--color-*` vars), so this pass was typography + component shape, copied from the site's stylesheets. No logic changes; tsc + lint clean.
 
 - **Type:** h1/h2 in a display serif via a base-layer rule. The site uses New Spirit Condensed (Adobe Fonts kit `xtg4bqr`, domain-locked — won't load on localhost/Vercel), so **Fraunces** (SOFT axis maxed) stands in. **JetBrains Mono** (the site's `--sub-font`) replaces Geist Mono for code, buttons, nav labels, and the new `eyebrow` utility (uppercase, bold, tracked — the site's `.eyebrow`)

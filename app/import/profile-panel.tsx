@@ -296,7 +296,7 @@ export function ProfilePanel({
   return (
     <section className="space-y-3 rounded-md border border-border p-4">
       <header className="flex items-baseline justify-between gap-2">
-        <h2 className="text-sm font-semibold">Mapping profile</h2>
+        <h2 className="eyebrow">Mapping profile</h2>
         <span className="text-xs text-muted-foreground">
           {status.kind === "loading"
             ? "loading…"

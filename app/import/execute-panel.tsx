@@ -12,6 +12,7 @@ import {
 import type { DryRunSource } from "@/lib/dry-run";
 import type { ImportEvent, ImportResult, RowError } from "@/lib/hubdb";
 import type { MappingState } from "@/lib/mapping";
+import { Chevron, withChevrons } from "@/components/ui/chevron";
 
 type PublishMode = "none" | "foreign-only" | "all";
 
@@ -316,7 +317,7 @@ export function ExecutePanel({
     <section className="space-y-4 rounded-md border border-border p-4">
       <header className="flex flex-wrap items-baseline justify-between gap-3">
         <div>
-          <h2 className="text-sm font-semibold">Execute</h2>
+          <h2 className="eyebrow">Execute</h2>
           <p className="text-xs text-muted-foreground">
             Enqueues an Inngest job that runs <code className="rounded bg-muted px-1">importRows</code>. Batches at 100/call, upserts by natural key.
             Publish step runs in dependency order. Safe to close this tab — the run continues on the server.
@@ -383,12 +384,12 @@ export function ExecutePanel({
 
       {stage.kind === "error" ? (
         <div className="rounded-md border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">
-          <p>{stage.message}</p>
+          <p>{withChevrons(stage.message)}</p>
           {stage.issues && stage.issues.length > 0 ? (
             <>
               <ul className="mt-2 list-disc space-y-1 pl-5 text-xs">
                 {stage.issues.map((issue, i) => (
-                  <li key={i}>{describeIssue(issue)}</li>
+                  <li key={i}>{withChevrons(describeIssue(issue))}</li>
                 ))}
               </ul>
               <details className="mt-2 text-xs">
@@ -400,7 +401,7 @@ export function ExecutePanel({
           {stage.hubspot ? (
             <details className="mt-2 text-xs">
               <summary className="cursor-pointer font-medium">
-                HubSpot response — {stage.hubspot.method} {stage.hubspot.path} → {stage.hubspot.status}
+                HubSpot response — {stage.hubspot.method} {stage.hubspot.path} <Chevron /> {stage.hubspot.status}
               </summary>
               <pre className="mt-2 overflow-x-auto rounded bg-background/40 p-2 text-foreground">
                 {JSON.stringify(stage.hubspot.body, null, 2)}
@@ -414,7 +415,7 @@ export function ExecutePanel({
         <>
           <div className="rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive space-y-1">
             <p className="font-semibold">Import aborted (onMissing=&quot;fail&quot;)</p>
-            <p className="text-xs">{stage.message}</p>
+            <p className="text-xs">{withChevrons(stage.message)}</p>
             {stage.response.row ? (
               <p className="text-xs">
                 Triggered by <code className="rounded bg-muted px-1 text-foreground">{stage.response.row.table}</code>{" "}
@@ -442,7 +443,7 @@ export function ExecutePanel({
         <>
           <div className="rounded-md border border-yellow-500/40 bg-yellow-500/10 p-3 text-sm text-yellow-900 dark:text-yellow-100 space-y-1">
             <p className="font-semibold">Import cancelled</p>
-            <p className="text-xs">{stage.message}</p>
+            <p className="text-xs">{withChevrons(stage.message)}</p>
           </div>
           {stage.response.result ? (
             <ResultView
@@ -584,13 +585,13 @@ function describeIssue(raw: unknown): string {
   const q = (v: unknown) => `"${String(v)}"`;
   switch (i.kind) {
     case "fk-target-column-missing":
-      return `${q(i.source)} → ${q(i.column)} links to ${i.foreignSource}.${i.matchKey}, but ${String(i.detail ?? "that column can't be resolved")}.`;
+      return `${q(i.source)} › ${q(i.column)} links to ${i.foreignSource}.${i.matchKey}, but ${String(i.detail ?? "that column can't be resolved")}.`;
     case "fk-not-configured":
-      return `${q(i.source)} → ${q(i.column)} is a FOREIGN_ID column with no foreign-key setup — pick its source table and match key.`;
+      return `${q(i.source)} › ${q(i.column)} is a FOREIGN_ID column with no foreign-key setup — pick its source table and match key.`;
     case "fk-on-non-foreign-column":
-      return `${q(i.source)} → ${q(i.column)} has a foreign-key link but its target column ${q(i.targetColumn)} is ${String(i.targetType)} — remove the link (probably drawn backwards).`;
+      return `${q(i.source)} › ${q(i.column)} has a foreign-key link but its target column ${q(i.targetColumn)} is ${String(i.targetType)} — remove the link (probably drawn backwards).`;
     case "target-column-missing":
-      return `${q(i.source)} → ${q(i.column)} is mapped to ${q(i.targetColumn)}, which table ${q(i.table)} no longer has — re-pick the target column.`;
+      return `${q(i.source)} › ${q(i.column)} is mapped to ${q(i.targetColumn)}, which table ${q(i.table)} no longer has — re-pick the target column.`;
     case "missing-target":
       return i.targetName
         ? `${q(i.source)} targets table ${q(i.targetName)}, which isn't on the portal.`
@@ -600,9 +601,9 @@ function describeIssue(raw: unknown): string {
     case "natural-key-not-mapped":
       return `${q(i.source)}: natural-key column ${q(i.column)} isn't mapped to a target column.`;
     case "cell-too-long":
-      return `${q(i.source)} → ${q(i.sourceColumn)}: ${String(i.count)} cell(s) exceed the ${String(i.maxLength)}-character ${String(i.targetType)} limit.`;
+      return `${q(i.source)} › ${q(i.sourceColumn)}: ${String(i.count)} cell(s) exceed the ${String(i.maxLength)}-character ${String(i.targetType)} limit.`;
     case "page-path-invalid":
-      return `${q(i.source)} → ${q(i.column)}: page paths must be unique, lowercase, and URL-safe.`;
+      return `${q(i.source)} › ${q(i.column)}: page paths must be unique, lowercase, and URL-safe.`;
     default:
       return JSON.stringify(raw);
   }
@@ -629,7 +630,7 @@ function ImagesCard({ images }: { images: ImagesSummary }) {
             {images.failed.map((f) => (
               <li key={`${f.folderPath}|${f.url}`} className="break-all">
                 <code className="rounded bg-muted px-1">{f.url}</code>{" "}
-                <span className="text-destructive">— {f.error}</span>
+                <span className="text-destructive">— {withChevrons(f.error)}</span>
               </li>
             ))}
           </ul>
@@ -748,7 +749,7 @@ function ResultView({
               <li key={p.table}>
                 <code className="rounded bg-muted px-1">{p.table}</code>{" "}
                 {p.error ? (
-                  <span className="text-destructive">— {p.error}</span>
+                  <span className="text-destructive">— {withChevrons(p.error)}</span>
                 ) : (
                   <span className="text-muted-foreground">
                     published{p.publishedAt ? ` at ${new Date(p.publishedAt).toLocaleTimeString()}` : ""}
@@ -814,7 +815,7 @@ function TableCard({ table }: { table: ImportResult["tables"][number] }) {
                 row {e.sourceIndex}: <code className="rounded bg-muted px-1">{e.kind}</code>
                 {e.column ? <> · <code className="rounded bg-muted px-1">{e.column}</code></> : null}
                 {" — "}
-                {e.detail}
+                {withChevrons(e.detail)}
               </li>
             ))}
           </ul>

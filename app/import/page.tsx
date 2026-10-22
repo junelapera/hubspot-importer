@@ -2,7 +2,7 @@ import Link from "next/link";
 import { listPortals } from "@/lib/db/portals";
 import { createSupabaseServerClient } from "@/lib/db/supabase";
 import { SourceUploader } from "./source-uploader";
-import { PAGE_ACCENTS, PageHeader } from "@/components/ui/page-header";
+import { PageHeader } from "@/components/ui/page-header";
 import { ErrorCard } from "@/components/ui/error-card";
 
 export const dynamic = "force-dynamic";
@@ -19,10 +19,8 @@ export default async function ImportPage() {
   }
 
   return (
-    <main className="mx-auto max-w-5xl px-6 py-12 space-y-10">
+    <main className="page space-y-10">
       <PageHeader
-        icon={PAGE_ACCENTS.import.icon}
-        accentColor={PAGE_ACCENTS.import.color}
         title="Import source"
         description="Upload one CSV per table, or paste a single JSON document containing a keyed set of tables. Sources are parsed on the server and previewed below — nothing is written to HubSpot yet."
       />

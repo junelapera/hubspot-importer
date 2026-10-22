@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { DocsToc } from "./docs-toc";
-import { PAGE_ACCENTS, PageHeader } from "@/components/ui/page-header";
+import { PageHeader } from "@/components/ui/page-header";
+import { Chevron } from "@/components/ui/chevron";
 
 export const metadata = {
   title: "Docs · S2 HubDB Importer",
@@ -35,11 +36,9 @@ const EXAMPLES = [
 
 export default function DocsPage() {
   return (
-    <main className="mx-auto max-w-6xl px-6 py-12 lg:grid lg:grid-cols-[minmax(0,1fr)_200px] lg:gap-10">
+    <main className="page lg:grid lg:grid-cols-[minmax(0,1fr)_200px] lg:gap-10">
       <div className="space-y-10">
         <PageHeader
-          icon={PAGE_ACCENTS.docs.icon}
-          accentColor={PAGE_ACCENTS.docs.color}
           title="How to use S2 HubDB Importer"
           description="A step-by-step walkthrough for importing relational data (a main table plus its foreign lookups) into a HubSpot HubDB portal, with a downloadable example dataset you can run end-to-end against a sandbox portal in a few minutes."
         />
@@ -106,13 +105,13 @@ export default function DocsPage() {
             <NavLink href="/register">/register</NavLink> to self-create an
             account (first visit) or <NavLink href="/login">/login</NavLink>{" "}
             if you already have one. Your signed-in email appears at the
-            bottom of the sidebar.
+            right end of the header.
           </li>
           <li>
             A HubSpot portal (sandbox strongly recommended for first-time
             runs) with a private-app token that has the <Code>hubdb</Code>{" "}
             read + write scopes. Create one under{" "}
-            <em>Settings → Integrations → Private Apps</em>.
+            <em>Settings <Chevron /> Integrations <Chevron /> Private Apps</em>.
           </li>
           <li>
             The app running locally or on Vercel with Supabase configured (see{" "}
@@ -339,7 +338,7 @@ export default function DocsPage() {
           </p>
           <ol className="list-decimal space-y-1 pl-5">
             <li>
-              Open the sheet, then <em>File → Share → Publish to web</em>.
+              Open the sheet, then <em>File <Chevron /> Share <Chevron /> Publish to web</em>.
             </li>
             <li>
               In the dialog, pick the specific sheet tab (not{" "}
@@ -376,11 +375,11 @@ export default function DocsPage() {
           <ul className="list-disc space-y-1 pl-5">
             <li>
               <strong>Types</strong> — checked most-specific first: DATE (
-              <Code>YYYY-MM-DD</Code>) → DATETIME (parses + has time-of-day)
-              → BOOLEAN → URL → IMAGE (URL + image extension) → CURRENCY
+              <Code>YYYY-MM-DD</Code>) <Chevron /> DATETIME (parses + has time-of-day)
+              <Chevron /> BOOLEAN <Chevron /> URL <Chevron /> IMAGE (URL + image extension) <Chevron /> CURRENCY
               (numeric + column name matches{" "}
-              <Code>price/cost/amount/total/…</Code>) → NUMBER → RICHTEXT
-              (any cell &gt; 500 chars) → TEXT fallback. Every stricter type
+              <Code>price/cost/amount/total/…</Code>) <Chevron /> NUMBER <Chevron /> RICHTEXT
+              (any cell &gt; 500 chars) <Chevron /> TEXT fallback. Every stricter type
               requires <em>all</em> non-empty samples to match; one bad row
               drops back to TEXT.
             </li>
@@ -407,8 +406,8 @@ export default function DocsPage() {
         </Subsection>
         <Subsection title="Foreign-key resolution">
           <p>
-            Match keys are normalized before lookup: trim → collapse
-            whitespace → casefold, so <Code>&quot;Acme&nbsp;&nbsp;Corp&quot;</Code>{" "}
+            Match keys are normalized before lookup: trim <Chevron /> collapse
+            whitespace <Chevron /> casefold, so <Code>&quot;Acme&nbsp;&nbsp;Corp&quot;</Code>{" "}
             and <Code>&quot;acme corp&quot;</Code> resolve to the same row.
             Use <em>strict</em> matching if you need byte-exact comparison.
             Multi-value cells are split on <Code>, | ; \n</Code> (pick one)
@@ -562,7 +561,7 @@ export default function DocsPage() {
             <strong>Registered but the login form says &quot;Email not confirmed&quot;</strong>{" "}
             — the Supabase project has &quot;Confirm email&quot; enabled.
             Ask an admin to toggle it off under{" "}
-            <em>Authentication → Providers → Email → Confirm email</em> in
+            <em>Authentication <Chevron /> Providers <Chevron /> Email <Chevron /> Confirm email</em> in
             the Supabase dashboard, then log in again.
           </li>
           <li>
@@ -607,7 +606,7 @@ function Section({
 }) {
   return (
     <section id={id} className="space-y-3 scroll-mt-20">
-      <h2 className="text-xl font-semibold">{title}</h2>
+      <h2 className="font-heading text-2xl font-medium tracking-tight">{title}</h2>
       <div className="space-y-3 text-sm leading-relaxed text-foreground/90">
         {children}
       </div>

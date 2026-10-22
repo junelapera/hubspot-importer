@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { listRecentJobs } from "@/lib/db/jobs";
 import { createSupabaseServerClient } from "@/lib/db/supabase";
-import { PAGE_ACCENTS, PageHeader } from "@/components/ui/page-header";
+import { PageHeader } from "@/components/ui/page-header";
 import { ErrorCard } from "@/components/ui/error-card";
 import { JobsList, type JobListRow } from "./jobs-list";
 
@@ -33,10 +33,8 @@ export default async function JobsPage() {
   }));
 
   return (
-    <main className="mx-auto max-w-5xl px-6 py-12 space-y-6">
+    <main className="page space-y-6">
       <PageHeader
-        icon={PAGE_ACCENTS.jobs.icon}
-        accentColor={PAGE_ACCENTS.jobs.color}
         title="Job history"
         description={
           <>

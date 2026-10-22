@@ -4,6 +4,7 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import type { DryRunReport, DryRunSource, DryRunTableReport, DryRunUnresolvedFk } from "@/lib/dry-run";
 import type { MappingState } from "@/lib/mapping";
+import { Chevron, withChevrons } from "@/components/ui/chevron";
 
 type Stage =
   | { kind: "idle" }
@@ -53,7 +54,7 @@ export function DryRunPanel({
     <section className="space-y-4 rounded-md border border-border p-4">
       <header className="flex flex-wrap items-baseline justify-between gap-3">
         <div>
-          <h2 className="text-sm font-semibold">Dry run</h2>
+          <h2 className="eyebrow">Dry run</h2>
           <p className="text-xs text-muted-foreground">
             Reports create/update counts, unresolved FKs, coercion warnings, and projected API calls. No writes.
           </p>
@@ -74,7 +75,7 @@ export function DryRunPanel({
       </header>
 
       {stage.kind === "error" ? (
-        <p className="text-sm text-destructive">{stage.message}</p>
+        <p className="text-sm text-destructive">{withChevrons(stage.message)}</p>
       ) : null}
 
       {stage.kind === "done" ? <ReportView report={stage.report} /> : null}
@@ -124,7 +125,7 @@ function TableReport({ table }: { table: DryRunTableReport }) {
       <header className="flex flex-wrap items-baseline gap-2">
         <span className="text-sm font-semibold">{table.sourceName}</span>
         <span className="text-muted-foreground">
-          → {table.targetName ? <code className="rounded bg-muted px-1">{table.targetName}</code> : <em>no target</em>}
+          <Chevron /> {table.targetName ? <code className="rounded bg-muted px-1">{table.targetName}</code> : <em>no target</em>}
           {table.targetId ? <> (id <code className="rounded bg-muted px-1">{table.targetId}</code>)</> : null}
         </span>
         <span className="ml-auto text-muted-foreground">{table.apiCalls} API call{table.apiCalls === 1 ? "" : "s"}</span>
@@ -149,7 +150,7 @@ function TableReport({ table }: { table: DryRunTableReport }) {
         <ul className="rounded-md border border-yellow-500/30 bg-yellow-500/5 p-2 space-y-0.5">
           {table.coercionWarnings.map((w, i) => (
             <li key={i} className="text-yellow-800 dark:text-yellow-200">
-              <code className="rounded bg-muted px-1">{w.sourceColumn}</code> → <code className="rounded bg-muted px-1">{w.targetColumn}</code>{" "}
+              <code className="rounded bg-muted px-1">{w.sourceColumn}</code> <Chevron /> <code className="rounded bg-muted px-1">{w.targetColumn}</code>{" "}
               ({w.targetType}):{" "}
               {w.examples ? (
                 <>

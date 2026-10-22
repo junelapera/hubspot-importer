@@ -3,7 +3,7 @@
 import { useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ArrowRight, Trash2 } from "lucide-react";
+import { ChevronRight, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { deleteJobsRequest } from "./delete-jobs";
@@ -191,7 +191,7 @@ export function JobsList({ jobs }: { jobs: JobListRow[] }) {
                         className="inline-flex items-center gap-1 text-xs underline underline-offset-2 hover:text-foreground"
                       >
                         details
-                        <ArrowRight aria-hidden="true" className="size-3" />
+                        <ChevronRight aria-hidden="true" className="size-3" />
                       </Link>
                       <RowDeleteButton job={j} disabled={busy} onDelete={remove} />
                     </div>
@@ -235,7 +235,7 @@ export function JobsList({ jobs }: { jobs: JobListRow[] }) {
                     className="inline-flex items-center gap-1 underline underline-offset-2 hover:text-foreground"
                   >
                     details
-                    <ArrowRight aria-hidden="true" className="size-3" />
+                    <ChevronRight aria-hidden="true" className="size-3" />
                   </Link>
                   <RowDeleteButton job={j} disabled={busy} onDelete={remove} />
                 </div>

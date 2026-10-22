@@ -1,10 +1,11 @@
 import Link from "next/link";
-import { ArrowRight } from "lucide-react";
+import { ChevronRight } from "lucide-react";
 import { listPortals } from "@/lib/db/portals";
 import { createSupabaseServerClient } from "@/lib/db/supabase";
 import { PortalForm } from "./portal-form";
-import { PAGE_ACCENTS, PageHeader } from "@/components/ui/page-header";
+import { PageHeader } from "@/components/ui/page-header";
 import { ErrorCard } from "@/components/ui/error-card";
+import { Chevron } from "@/components/ui/chevron";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -20,10 +21,8 @@ export default async function PortalsPage() {
   }
 
   return (
-    <main className="mx-auto max-w-5xl px-6 py-12 space-y-10">
+    <main className="page space-y-10">
       <PageHeader
-        icon={PAGE_ACCENTS.portals.icon}
-        accentColor={PAGE_ACCENTS.portals.color}
         title="Portals"
         description="Connect a HubSpot portal by pasting its private-app token. Tokens are encrypted at rest and never returned to the browser after save."
       />
@@ -32,7 +31,7 @@ export default async function PortalsPage() {
         <ErrorCard error={loadError} />
       ) : (
         <section className="space-y-3">
-          <h2 className="text-sm font-semibold">Connected ({portals.length})</h2>
+          <h2 className="eyebrow">Connected ({portals.length})</h2>
           {portals.length === 0 ? (
             <p className="text-sm text-muted-foreground">No portals yet — add one below.</p>
           ) : (
@@ -52,7 +51,7 @@ export default async function PortalsPage() {
                     className="inline-flex items-center gap-1 text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground"
                   >
                     schema
-                    <ArrowRight aria-hidden="true" className="size-3" />
+                    <ChevronRight aria-hidden="true" className="size-3" />
                   </Link>
                 </li>
               ))}
@@ -62,11 +61,11 @@ export default async function PortalsPage() {
       )}
 
       <section className="space-y-3">
-        <h2 className="text-sm font-semibold">Add a portal</h2>
+        <h2 className="eyebrow">Add a portal</h2>
         <PortalForm />
         <p className="text-xs text-muted-foreground">
-          Private-app token from HubSpot: Settings → Integrations → Private
-          Apps → your app → Auth tab. Requires the <code>hubdb</code>{" "}
+          Private-app token from HubSpot: Settings <Chevron /> Integrations <Chevron /> Private
+          Apps <Chevron /> your app <Chevron /> Auth tab. Requires the <code>hubdb</code>{" "}
           (read + write) scope.
         </p>
       </section>

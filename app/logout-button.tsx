@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { createSupabaseBrowserClient } from "@/lib/db/supabase-browser";
+import { Button } from "@/components/ui/button";
 
 // Client button that signs out via the browser Supabase client (clears
 // the local session) AND hits /api/auth/logout (clears the server cookie
@@ -26,16 +27,14 @@ export function LogoutButton({ className }: { className?: string }) {
   }
 
   return (
-    <button
+    <Button
       type="button"
+      variant="outline"
       onClick={onClick}
       disabled={busy}
-      className={
-        "text-left text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline disabled:opacity-50 " +
-        (className ?? "")
-      }
+      className={"h-8 px-3 text-[11px] " + (className ?? "")}
     >
       {busy ? "Signing out…" : "Sign out"}
-    </button>
+    </Button>
   );
 }
