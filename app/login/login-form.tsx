@@ -38,8 +38,8 @@ export function LoginForm({ next }: { next: string }) {
 
   return (
     <form onSubmit={onSubmit} className="space-y-4">
-      <label className="flex flex-col gap-1 text-sm">
-        <span className="font-medium">Email</span>
+      <label className="block">
+        <span className="form-label">Email</span>
         <input
           type="email"
           autoComplete="email"
@@ -48,11 +48,11 @@ export function LoginForm({ next }: { next: string }) {
           value={email}
           onChange={(e) => setEmail(e.target.value)}
           placeholder="you@saltedstone.com"
-          className="h-9 w-full rounded-md border border-input bg-field px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/50"
+          className="form-input mt-1"
         />
       </label>
-      <label className="flex flex-col gap-1 text-sm">
-        <span className="font-medium">Password</span>
+      <label className="block">
+        <span className="form-label">Password</span>
         <input
           type="password"
           autoComplete="current-password"
@@ -60,11 +60,11 @@ export function LoginForm({ next }: { next: string }) {
           disabled={disabled}
           value={password}
           onChange={(e) => setPassword(e.target.value)}
-          className="h-9 w-full rounded-md border border-input bg-field px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/50"
+          className="form-input mt-1"
         />
       </label>
       {state.kind === "error" ? (
-        <p className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+        <p className="text-sm text-destructive" role="alert">
           {state.message}
         </p>
       ) : null}

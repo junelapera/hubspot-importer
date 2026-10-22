@@ -232,3 +232,31 @@
   max-width: var(--container-6xl);
   padding: --spacing(12) --spacing(6);
 }
+
+/* Form field label + input, as in hubspot-site-auditor's .label / .input.
+   Used on the auth forms. */
+@utility form-label {
+  display: block;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+@utility form-input {
+  display: block;
+  width: 100%;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--input);
+  background-color: var(--field);
+  padding: --spacing(2) --spacing(3);
+  font-size: var(--text-sm);
+  line-height: var(--text-sm--line-height);
+  &::placeholder {
+    color: color-mix(in srgb, var(--foreground) 60%, transparent);
+  }
+  &:focus {
+    outline: none;
+    box-shadow: 0 0 0 1px var(--background), 0 0 0 3px var(--ring);
+  }
+}
