@@ -2,7 +2,20 @@
 
 Running log of where the HubDB Importer project is, what's in flight, and what's next. Update as we go.
 
-## Current state — 2026-10-08
+## Current state — 2026-10-22
+
+**UI restyled to match saltedstone.com** (`40039ad`). The brand palette already matched the site's CSS exactly (`template_theme-overrides.min.css` `--color-*` vars), so this pass was typography + component shape, copied from the site's stylesheets. No logic changes; tsc + lint clean.
+
+- **Type:** h1/h2 in a display serif via a base-layer rule. The site uses New Spirit Condensed (Adobe Fonts kit `xtg4bqr`, domain-locked — won't load on localhost/Vercel), so **Fraunces** (SOFT axis maxed) stands in. **JetBrains Mono** (the site's `--sub-font`) replaces Geist Mono for code, buttons, nav labels, and the new `eyebrow` utility (uppercase, bold, tracked — the site's `.eyebrow`)
+- **Buttons** (`components/ui/button.tsx`): site pill — `rounded-full`, 2px forest border, uppercase mono; ochre fill with forest text (`--primary-foreground` flipped from offwhite to forest), hover inverts to forest/offwhite + small lift. Heights unchanged (h-9 canonical)
+- **Chrome** (`app/nav.tsx`): sidebar + mobile nav are ochre like the site's header bar; active item is an offwhite pill with a forest border (site's badge-button). **Per-section active colors removed** (`activeBg`) — they clashed with the ochre bar; section accents now live only on `PageHeader` icons
+- **PageHeader**: large serif h1 in forest (was accent-colored sans), 48px accent icon, 2px forest rule underneath
+- **Home**: numbered `01 ✷ Connect`-style cards (site's index + ✷ divider motifs), serif titles, hover to ochre + lift
+- Misc: `--radius` 10px → 5px (site's rectangular surfaces), yellow `::selection`, login/register use eyebrow + serif headings
+
+**Not yet eyeballed past `/login`** — the auth gate blocked an unauthenticated smoke check. Worth a pass over `/import` (dense forms, many `text-sm font-semibold` h2 card titles now render in the serif) and the docs page.
+
+## Prior state — 2026-10-08
 
 **First real end-to-end import (Prime Capital test workbook: 225 advisors + 78 locations, multi-value advisor FK, 302 images) surfaced a batch of importer bugs — all fixed.** Several were silent failures (job "succeeded", nothing written), so most fixes either correct the behavior or turn the silence into a dry-run error + synthesis issue that blocks execute. 291 vitest / 22 suites green, tsc + lint clean. Committed on branch `import-fixes-2026-10-08`.
 
