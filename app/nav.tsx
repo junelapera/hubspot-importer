@@ -14,24 +14,27 @@ type NavItem = {
   href: string;
   label: string;
   icon: string;
-  // Active-state background color from the S2 brand palette (defined in
-  // globals.css as --color-brand-*). Each nav item gets its own so the
-  // sidebar reads as a mini map of the app — Home = ochre (primary),
-  // Portals = purple (integrations), Import = grass (action / go),
-  // Jobs = burgundy (history), Docs = navy (informational).
-  activeBg: string;
   // A page belongs to a section if the pathname startsWith the href
   // (so /portals/[id]/schema highlights "Portals"). Home is exact-match.
   exact?: boolean;
 };
 
+// Chrome follows saltedstone.com's header: ochre bar, forest mono labels,
+// active item as an offwhite pill with a forest border (the site's
+// badge-button). Per-section accent colors live on PageHeader instead.
 const ITEMS: NavItem[] = [
-  { href: "/", label: "Home", icon: "/icons/laptop.svg", exact: true, activeBg: "var(--color-brand-ochre)" },
-  { href: "/portals", label: "Portals", icon: "/icons/compensation.svg", activeBg: "var(--color-brand-purple)" },
-  { href: "/import", label: "Import", icon: "/icons/hubspot-expertise.svg", activeBg: "var(--color-brand-grass)" },
-  { href: "/jobs", label: "Jobs", icon: "/icons/custom-solutions.svg", activeBg: "var(--color-brand-burgundy)" },
-  { href: "/docs", label: "Docs", icon: "/icons/team-building.svg", activeBg: "var(--color-brand-navy)" },
+  { href: "/", label: "Home", icon: "/icons/laptop.svg", exact: true },
+  { href: "/portals", label: "Portals", icon: "/icons/compensation.svg" },
+  { href: "/import", label: "Import", icon: "/icons/hubspot-expertise.svg" },
+  { href: "/jobs", label: "Jobs", icon: "/icons/custom-solutions.svg" },
+  { href: "/docs", label: "Docs", icon: "/icons/team-building.svg" },
 ];
+
+const ITEM_BASE =
+  "flex items-center rounded-full border-2 font-mono font-bold uppercase tracking-[0.05em] transition-all";
+const ITEM_ACTIVE = "border-foreground bg-background text-foreground";
+const ITEM_IDLE =
+  "border-transparent text-foreground hover:border-foreground hover:bg-foreground hover:text-background";
 
 // CSS mask lets the flat-colored Saltedstone SVGs inherit `currentColor`
 // so the icon flips between forest / offwhite depending on active state,
@@ -60,19 +63,19 @@ export function Sidebar({ userEmail }: { userEmail?: string | null }) {
   return (
     <aside
       aria-label="Primary"
-      className="hidden md:flex md:w-56 md:flex-col md:border-r md:border-border md:bg-muted/30 md:sticky md:top-0 md:h-screen md:shrink-0"
+      className="hidden md:flex md:w-60 md:flex-col md:border-r-2 md:border-sidebar-border md:bg-sidebar md:text-sidebar-foreground md:sticky md:top-0 md:h-screen md:shrink-0"
     >
-      <div className="px-4 py-5 space-y-3 border-b border-border">
+      <div className="px-5 py-6 space-y-3 border-b-2 border-sidebar-border">
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
           src="/saltedstone-logo.svg"
           alt="Saltedstone"
           className="h-6 w-auto dark:invert"
         />
-        <p className="text-sm font-semibold">S2 HubDB Importer</p>
+        <p className="eyebrow">HubDB Importer</p>
       </div>
       <nav className="flex-1 overflow-y-auto p-3">
-        <ul className="space-y-1">
+        <ul className="space-y-1.5">
           {ITEMS.map((item) => {
             const active = isActive(pathname, item);
             return (
@@ -80,13 +83,7 @@ export function Sidebar({ userEmail }: { userEmail?: string | null }) {
                 <Link
                   href={item.href}
                   aria-current={active ? "page" : undefined}
-                  style={active ? { backgroundColor: item.activeBg } : undefined}
-                  className={
-                    "flex items-center gap-2 rounded-md px-2.5 py-1.5 text-sm transition-colors " +
-                    (active
-                      ? "text-background"
-                      : "text-foreground/80 hover:bg-muted hover:text-foreground")
-                  }
+                  className={`${ITEM_BASE} gap-2.5 px-3 py-1.5 text-xs ${active ? ITEM_ACTIVE : ITEM_IDLE}`}
                 >
                   <span
                     aria-hidden
@@ -101,14 +98,14 @@ export function Sidebar({ userEmail }: { userEmail?: string | null }) {
         </ul>
       </nav>
       {userEmail ? (
-        <div className="space-y-1 border-t border-border p-3 text-xs">
-          <p className="truncate font-medium text-foreground" title={userEmail}>
+        <div className="space-y-1 border-t-2 border-sidebar-border px-5 py-3 text-xs">
+          <p className="truncate font-medium" title={userEmail}>
             {userEmail}
           </p>
-          <LogoutButton />
+          <LogoutButton className="text-foreground!" />
         </div>
       ) : null}
-      <div className="border-t border-border p-3 text-[11px] text-muted-foreground">
+      <div className="border-t-2 border-sidebar-border px-5 py-3 text-[11px]">
         <a
           href="https://github.com/junelapera/hubspot-importer"
           className="underline-offset-2 hover:underline"
@@ -126,7 +123,7 @@ export function MobileNav() {
   return (
     <nav
       aria-label="Primary"
-      className="md:hidden sticky top-0 z-10 flex items-center gap-1 overflow-x-auto border-b border-border bg-background/95 px-3 py-2 backdrop-blur"
+      className="md:hidden sticky top-0 z-10 flex items-center gap-1 overflow-x-auto border-b-2 border-sidebar-border bg-sidebar px-3 py-2"
     >
       {ITEMS.map((item) => {
         const active = isActive(pathname, item);
@@ -135,13 +132,7 @@ export function MobileNav() {
             key={item.href}
             href={item.href}
             aria-current={active ? "page" : undefined}
-            style={active ? { backgroundColor: item.activeBg } : undefined}
-            className={
-              "flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs whitespace-nowrap transition-colors " +
-              (active
-                ? "text-background"
-                : "text-foreground/80 hover:bg-muted")
-            }
+            className={`${ITEM_BASE} gap-1.5 px-2.5 py-1 text-[11px] whitespace-nowrap ${active ? ITEM_ACTIVE : ITEM_IDLE}`}
           >
             <span
               aria-hidden

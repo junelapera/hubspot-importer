@@ -21,26 +21,34 @@ export default function Home() {
         }
       />
 
-      <nav aria-label="Sections" className="grid gap-3 sm:grid-cols-2">
+      <nav aria-label="Sections" className="grid gap-4 sm:grid-cols-2">
         <SectionLink
+          index="01"
+          tag="Connect"
           href="/portals"
           title="Portals"
-          desc="Connect HubSpot portals with private-app tokens (F1)."
+          desc="Connect HubSpot portals with private-app tokens."
           ready
         />
         <SectionLink
+          index="02"
+          tag="Import"
           href="/import"
           title="Import source"
-          desc="Upload CSV or JSON, preview + validate before mapping (F2)."
+          desc="Upload CSV, Excel, JSON or a Google Sheet, then map, dry-run and execute."
           ready
         />
         <SectionLink
+          index="03"
+          tag="History"
           href="/jobs"
           title="Jobs"
-          desc="History of imports, dry runs, and publishes with per-table totals and row-error logs (F10 + F11)."
+          desc="History of imports, dry runs, and publishes with per-table totals and row-error logs."
           ready
         />
         <SectionLink
+          index="04"
+          tag="Guide"
           href="/docs"
           title="Docs"
           desc="Step-by-step walkthrough + downloadable example CSVs and schema.json for testing the full loop."
@@ -48,7 +56,7 @@ export default function Home() {
         />
       </nav>
 
-      <footer className="border-t border-border pt-6 text-xs text-muted-foreground">
+      <footer className="border-t-2 border-foreground pt-6 text-xs text-muted-foreground">
         <a
           href="https://github.com/junelapera/hubspot-importer"
           className="underline underline-offset-2"
@@ -64,11 +72,15 @@ export default function Home() {
 }
 
 function SectionLink({
+  index,
+  tag,
   href,
   title,
   desc,
   ready,
 }: {
+  index: string;
+  tag: string;
   href: string;
   title: string;
   desc: string;
@@ -80,21 +92,23 @@ function SectionLink({
     <Wrapper
       href={href}
       className={
-        "flex flex-col gap-1 rounded-md border border-border p-4 transition-colors " +
+        "group flex flex-col gap-3 rounded-md border-2 border-foreground bg-card p-5 transition-all " +
         (disabled
           ? "cursor-not-allowed opacity-50"
-          : "hover:border-foreground/40 hover:bg-muted/50")
+          : "hover:-translate-y-1 hover:bg-primary")
       }
     >
-      <div className="flex items-center gap-2">
-        <span className="text-sm font-semibold">{title}</span>
-        {disabled ? (
-          <span className="rounded-full border border-border bg-muted px-1.5 py-0.5 text-[10px] uppercase tracking-wider text-muted-foreground">
-            planned
-          </span>
-        ) : null}
-      </div>
-      <span className="text-xs text-muted-foreground">{desc}</span>
+      <span className="eyebrow">
+        {index} <span aria-hidden>✷</span> {tag}
+        {disabled ? " · planned" : null}
+      </span>
+      <h2 className="text-3xl font-medium leading-none">{title}</h2>
+      <span className="text-sm text-muted-foreground group-hover:text-foreground">{desc}</span>
+      {disabled ? null : (
+        <span className="eyebrow mt-auto pt-2">
+          Open <span aria-hidden>→</span>
+        </span>
+      )}
     </Wrapper>
   );
 }

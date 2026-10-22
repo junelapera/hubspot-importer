@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { Hanken_Grotesk, Geist_Mono } from "next/font/google";
+import { Fraunces, Hanken_Grotesk, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
 import { MobileNav, Sidebar } from "./nav";
 import { getCurrentUser } from "@/lib/db/supabase-server-auth";
@@ -9,8 +9,18 @@ const hankenSans = Hanken_Grotesk({
   subsets: ["latin"],
 });
 
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
+// saltedstone.com sets headings in New Spirit Condensed (Adobe Fonts, kit is
+// domain-locked so it won't load here). Fraunces with the SOFT axis maxed is
+// the closest freely-licensed match: soft, slightly wonky display serif.
+const fraunces = Fraunces({
+  variable: "--font-fraunces",
+  subsets: ["latin"],
+  axes: ["SOFT", "opsz"],
+});
+
+// The site's "sub-font": eyebrows, buttons, nav labels, and code.
+const jetbrainsMono = JetBrains_Mono({
+  variable: "--font-jetbrains-mono",
   subsets: ["latin"],
 });
 
@@ -33,7 +43,7 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html
       lang="en"
-      className={`${hankenSans.variable} ${geistMono.variable} h-full antialiased`}
+      className={`${hankenSans.variable} ${fraunces.variable} ${jetbrainsMono.variable} h-full antialiased`}
     >
       <body className="min-h-full flex">
         <Sidebar userEmail={userEmail} />

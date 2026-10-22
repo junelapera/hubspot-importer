@@ -25,8 +25,8 @@ export default async function LoginPage({
       </div>
       <div className="space-y-6 rounded-md border border-border bg-card p-8">
         <header className="space-y-1">
-          <p className="text-xs uppercase tracking-wider text-muted-foreground">S2 HubDB Importer</p>
-          <h1 className="text-2xl font-semibold">Sign in</h1>
+          <p className="eyebrow text-muted-foreground">S2 HubDB Importer</p>
+          <h1 className="text-4xl font-medium leading-none">Sign in</h1>
           <p className="text-sm text-muted-foreground">
             Use your <strong>@{ALLOWED_EMAIL_DOMAIN}</strong> account.
           </p>

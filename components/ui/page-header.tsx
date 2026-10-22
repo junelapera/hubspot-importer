@@ -1,9 +1,8 @@
 import type { CSSProperties, ReactNode } from "react";
 
-// Standard page header that ties each top-level route to the nav item's
-// accent color. Renders the sidebar icon at 40px in the accent color to
-// the left of the h1, so the visual identity is consistent (sidebar chip
-// → page header) and each section reads as themed.
+// Standard page header that ties each top-level route to its accent
+// color. Renders the sidebar icon at 48px in the accent color to the left
+// of the h1 so each section reads as themed.
 export function PageHeader({
   icon,
   accentColor,
@@ -21,21 +20,23 @@ export function PageHeader({
   children?: ReactNode;
 }) {
   return (
-    <header className="flex items-start gap-4">
+    <header className="flex items-start gap-5 border-b-2 border-foreground pb-6">
       <span
         aria-hidden
-        className="mt-1 size-10 shrink-0"
+        className="mt-1 size-12 shrink-0"
         style={iconMaskStyle(icon, accentColor)}
       />
-      <div className="flex-1 space-y-2">
+      <div className="flex-1 space-y-3">
         <div className="flex flex-wrap items-baseline gap-3">
-          <h1 className="text-2xl font-semibold" style={{ color: accentColor }}>
+          {/* saltedstone.com h1: condensed display serif, forest, tight
+              leading. The accent color stays on the icon. */}
+          <h1 className="text-4xl font-medium leading-[0.95] text-foreground md:text-5xl">
             {title}
           </h1>
           {children}
         </div>
         {description ? (
-          <p className="text-sm text-muted-foreground">{description}</p>
+          <p className="max-w-3xl text-base leading-relaxed text-muted-foreground">{description}</p>
         ) : null}
       </div>
     </header>
